@@ -59,7 +59,7 @@ contract Pausable is Ownable {
 }
 
 interface tokenRecipient {
-  function receiveApproval(address _from, uint256 _value, address _token, bytes _extraData) external;
+  function receiveApproval(address _from, uint256 _value, address _token, address _owner, bytes _extraData) external;
 }
 
 /**
@@ -67,7 +67,7 @@ interface tokenRecipient {
  * Written by Shin HyunJae
  * version 12
  */
-contract TokenERC20 is Pausable {
+contract TokenERC20withExchanger is Pausable {
     using SafeMath for uint256;
 
     // Public variables of the token
@@ -142,6 +142,7 @@ contract TokenERC20 is Pausable {
      * @param _owner Owner address to query tokens balance
      * @param _spender The address allowed tokens balance
      */
+     //_owner 가 _spender에게 위임을 한 돈이 얼마나 남았는가 확인
     function allowance(address _owner, address _spender) external view returns (uint256 remaining) {
         remaining = allowed[_owner][_spender];
         return remaining;
@@ -190,6 +191,7 @@ contract TokenERC20 is Pausable {
      * @param _to The address of the recipient
      * @param _value the amount to send
      */
+     // 돈을 송금하려는 사람이 호출함. _from으로부터 _to로 보내는것을 내가 대신한다.
     function transferFrom(address _from, address _to, uint256 _value) public noReentrancy returns (bool success) {
         require(_value <= allowed[_from][msg.sender]);     // Check allowance
         allowed[_from][msg.sender] = allowed[_from][msg.sender].sub(_value);
@@ -204,8 +206,9 @@ contract TokenERC20 is Pausable {
      * @param _spender The address authorized to spend
      * @param _value the max amount they can spend
      */
+     // 내가 _spender에게 _value만큼 송금 권한을 위임한다.
     function _approve(address _spender, uint256 _value) internal returns (bool success) {
-        allowed[msg.sender][_spender] = _value;
+        allowed[msg.sender][_spender] = _value; // 내가 _spender에게 _value만큼 송금권한을 준다.
         emit Approval(msg.sender, _spender, _value);
         success = true;
         return success;
@@ -219,6 +222,7 @@ contract TokenERC20 is Pausable {
      * @param _spender The address authorized to spend
      * @param _value the max amount they can spend
      */
+     // 내가 _spender에게 _value만큼 송금권한을 위임한다. _approve wrapper함수
     function approve(address _spender, uint256 _value) public noReentrancy returns (bool success) {
         success = _approve(_spender, _value);
         return success;
@@ -233,10 +237,11 @@ contract TokenERC20 is Pausable {
      * @param _value the max amount they can spend
      * @param _extraData some extra information to send to the approved contract
      */
+     // _spender에게 _value만큼의 송금 권한을 부여하고 _spender는(다른 컨트랙트) receiveApproval을 통해 나에게 승인 받았다는 사실을 알게된다.
     function approveAndCall(address _spender, uint256 _value, bytes _extraData) public noReentrancy returns (bool success) {
         tokenRecipient spender = tokenRecipient(_spender);
         if (_approve(_spender, _value)) {
-            spender.receiveApproval(msg.sender, _value, this, _extraData);
+            spender.receiveApproval(msg.sender, _value, this, address(owner), _extraData);
             success = true;
             return success;
         }
@@ -291,4 +296,9 @@ contract TokenERC20 is Pausable {
         emit FrozenFunds(target, false);
     }
 
+    function isOwnerPayable(uint256 payment) external view returns (bool success){
+        require(payment <= balances[address(owner)]);
+        success = true;
+        return success;
+    }
 }
