@@ -62,6 +62,10 @@ interface tokenRecipient {
   function receiveApproval(address _from, uint256 _value, address _token, bytes _extraData) external;
 }
 
+interface nemoExchanger {
+  function exchangeTokenToEther(address _to, uint256 _amountOfEther) external returns (bool success);
+}
+
 /**
  * NemoLab ERC20 Token
  * Written by Shin HyunJae
@@ -181,6 +185,7 @@ contract TokenERC20 is Pausable {
         return success;
     }
 
+
     /**
      * Transfer tokens from other address
      *
@@ -291,4 +296,52 @@ contract TokenERC20 is Pausable {
         emit FrozenFunds(target, false);
     }
 
+}
+
+
+interface token {
+    function transfer(address _to, uint256 _value) external returns (bool success);
+    function balanceOf(address _account) external view returns (uint256 balance);
+    function approve(address _spender, uint256 _value) public noReentrancy returns (bool success);
+}
+
+
+contract TokenExchanger is Pausable {
+    token public nemoToken;
+
+    constructor(
+        address addressOfTokenUsedAsReward // nomo token contract
+    ) public {
+        nemoToken = token(addressOfTokenUsedAsReward);
+    }
+
+    //1. 이더받고 토큰으로 전송
+    function exchangeEtherToToken(uint256 _exchangeRate) payable external returns (bool success){
+        uint256 tokenPayment;
+        require(msg.value > 0);
+        require(_exchangeRate != 0);
+
+        tokenPayment = msg.value * _exchangeRate;
+        require(nemoToken.balanceOf(address(this)) >= tokenPayment);
+        require(nemoToken.transfer(msg.sender, tokenPayment));
+        success = true;
+        return success;
+    }
+
+    //2. 토큰받고 이더로 전송
+    function exchangeTokenToEther(address _to, uint256 _amountOfToken) external returns (bool success){
+        nemoToken.approve(address(this), _amountOfToken);
+
+        success = true;
+        return success;
+    }
+
+    //3. 토큰 송금
+
+    //4. 토큰 받기
+
+    //5. 이더 송금
+
+    //6. 이더 받기
+    function () payable public {}
 }

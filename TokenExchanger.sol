@@ -1,41 +1,95 @@
 pragma solidity ^0.4.21;
 
-interface token {
-    function transferFrom(address _from, address _to, uint256 _value) external returns (bool success);
-    function isOwnerPayable(uint256 payment) external view returns (bool success);
+contract Ownable {
+    address internal owner;
+
+    /* you have to use this contract to be inherited because it is internal.*/
+    constructor() internal {
+        owner = msg.sender;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner);
+        _;
+    }
+
+    function transferOwnership(address newOwner) onlyOwner public {
+        owner = newOwner;
+    }
+
 }
 
-contract TokenExchanger {
+contract Pausable is Ownable {
+    event Pause();
+    event Unpause();
+
+    bool internal paused;
+
+    modifier whenNotPaused() {
+        require(!paused);
+        _;
+    }
+
+    modifier whenPaused() {
+        require(paused);
+        _;
+    }
+
+    modifier noReentrancy() {
+        require(!paused);
+        paused = true;
+        _;
+        paused = false;
+    }
+
+    /* When you discover your smart contract is under attack, you can buy time to upgrade the contract by
+       immediately pausing the contract.
+     */
+    function pause() public onlyOwner whenNotPaused {
+        paused = true;
+        emit Pause();
+    }
+
+    function unpause() public onlyOwner whenPaused {
+        paused = false;
+        emit Unpause();
+    }
+}
+
+
+interface token {
+    //function transferFrom(address _from, address _to, uint256 _value) external returns (bool success);
+    //function isOwnerPayable(uint256 payment) external view returns (bool success);
+    function transfer(address _to, uint256 _value) public noReentrancy returns (bool success);
+    function balanceOf(address _account) external view returns (uint256 balance);
+}
+
+contract TokenExchanger is Pausable {
     token public tokenReward;
     address owner;
     uint256 public checkValue = 1;
 
-    event ReceiveApproval(address sender, uint256 amount, address addressOfToken, bytes extraData);
-
     constructor(
-        address addressOfTokenUsedAsReward
+        address addressOfTokenUsedAsReward // nomo token contract
     ) public {
         tokenReward = token(addressOfTokenUsedAsReward);
     }
 
-    function receiveApproval(address _sender, uint256 _amount, address _addressOfToken, address _addressOfOwner, bytes _extraData) external {
-        owner = _addressOfOwner;
-        emit ReceiveApproval(_sender, _amount, _addressOfToken, _extraData);
-        checkValue += 1;
-    }
-
-    function exchangeToken(uint256 exchangeRate) payable external returns (bool success){
-        uint256 payment;
+    function exchangeEtherToToken(uint256 exchangeRate) payable external returns (bool success){
+        uint256 tokenPayment;
         require(msg.value > 0);
         require(exchangeRate != 0);
 
-        require(address(owner).send(msg.value)); // Ethereum will be sent to ERC20 contract.
-
-        payment = msg.value * exchangeRate;
-        require(tokenReward.isOwnerPayable(payment));
-        require(tokenReward.transferFrom(address(owner), msg.sender, msg.value * exchangeRate));
+        tokenPayment = msg.value * exchangeRate;
+        require(tokenReward.balanceOf(address(this)) >= tokenPayment);
+        require(tokenReward.transfer(msg.sender, tokenPayment));
         success = true;
         return success;
+    }
+
+
+    function exchangeTokenToEther(uint256 amountOfToken, uint256 exchangeRate) external returns (bool success){
+
     }
 
 }
