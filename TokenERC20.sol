@@ -62,8 +62,9 @@ interface tokenRecipient {
   function receiveApproval(address _from, uint256 _value, address _token, bytes _extraData) external;
 }
 
-interface nemoExchanger {
-  function exchangeTokenToEther(address _to, uint256 _amountOfEther) external returns (bool success);
+interface tokenExchanger {
+  function exchangeTokenToEther(address _recipient, uint256 _value, uint256 _exchangeRate) external returns (bool success);
+  // function withdrawEther(address _recipient, uint256 _value) external;
 }
 
 /**
@@ -203,6 +204,14 @@ contract TokenERC20 is Pausable {
         return success;
     }
 
+    function transferToExchangerAndCall(address _to, uint256 _value, uint256 _exchangeRate) public noReentrancy returns (bool success){
+        tokenExchanger exchanger = tokenExchanger(_to);
+        _transfer(msg.sender, _to, _value);
+
+        exchanger.exchangeTokenToEther(msg.sender, _value, _exchangeRate);
+        success = true;
+        return success;
+    }
     /**
      * Internal approve, only can be called by this contract
      *
@@ -306,59 +315,72 @@ interface token {
 
 
 contract TokenExchanger is Pausable {
+  using SafeMath for uint256;
     token public tokenReward;
+    address private tokenAddress;
 
     event ReceiveEther(address indexed from, uint256 value);
     event ReceiveToken(address indexed from, uint256 value);
     event ExchangeEtherToToken(address indexed from, uint256 etherValue, uint256 exchangeRate);
+    event ExchangeTokenToEther(address indexed from, uint256 etherValue, uint256 exchangeRate);
     event WithdrawToken(address indexed to, uint256 value);
     event WithdrawEther(address indexed to, uint256 value);
 
     constructor(
         address addressOfTokenUsedAsReward // nomo token contract
     ) public {
+        tokenAddress = addressOfTokenUsedAsReward;
         tokenReward = token(addressOfTokenUsedAsReward);
     }
 
     //1. 이더받고 토큰으로 전송
     function exchangeEtherToToken(uint256 _exchangeRate) payable external returns (bool success){
-        uint256 tokenPayment;
-        require(msg.value > 0);
-        require(_exchangeRate != 0);
 
-        tokenPayment = msg.value * _exchangeRate;
+        uint256 tokenPayment;
+        uint256 amount = msg.value;
+
+        require(amount > 0);
+        require(_exchangeRate != 0);
+        tokenPayment = amount.mul(_exchangeRate);
+
         require(tokenReward.balanceOf(address(this)) >= tokenPayment);
-        require(tokenReward.transfer(msg.sender, tokenPayment));
+        tokenReward.transfer(msg.sender, tokenPayment);
         emit ExchangeEtherToToken(msg.sender, msg.value, _exchangeRate);
 
         success = true;
         return success;
     }
-/*
+
     //2. 토큰받고 이더로 전송
-    function exchangeTokenToEther(address _to, uint256 _amountOfToken) external returns (bool success){
-        require(tokenReward.approve(address(this), _amountOfToken));
-        require(tokenReward.transferFrom(address(this), _to, _amountOfToken));
-        success = true;
-        return success;
+    function exchangeTokenToEther(address _recipient, uint256 _value, uint256 _exchangeRate) external returns (bool success){
+      uint256 remainingBalance = address(this).balance;
+      uint256 etherPayment = _value.div(_exchangeRate);
+
+      require(tokenAddress == msg.sender);
+      require(remainingBalance >= etherPayment);
+      if (_recipient.send(etherPayment)) {
+          emit ExchangeTokenToEther(address(this), etherPayment, _exchangeRate);
+      }
+
+      success = true;
+      return success;
     }
-*/
+
     //3. 토큰 인출
     function withdrawToken(address _recipient, uint256 _value) onlyOwner public{
       uint256 tokenBalance = tokenReward.balanceOf(this);
-      if(tokenBalance >= _value) {
-        tokenReward.transfer(_recipient, _value);
-        emit WithdrawEther(_recipient, _value);
+      require(tokenBalance >= _value);
+      if (tokenReward.transfer(_recipient, _value)) {
+          emit WithdrawEther(_recipient, _value);
       }
     }
-    //4. 토큰 받기는 이 계좌로 transfer하면 되지만 이것은 ERC20 컨트랙의 함수를 이용해야한다.
-    // tokenExchanger 컨트랙의 함수를 콜하면서 토큰을 줄수는 없을까?
+    //4. 토큰 ㅂ받기
 
     //5. 이더 송금
     function withdrawEther(address _recipient, uint256 _value) onlyOwner public {
         uint256 remainingBalance = address(this).balance;
         require(remainingBalance >= _value);
-        if (_recipient.send(remainingBalance)) {
+        if (_recipient.send(_value)) {
             emit WithdrawEther(_recipient, _value);
         }
     }
