@@ -1,3 +1,4 @@
+// contract version 0.0.2
 pragma solidity ^0.4.21;
 
 import "./SafeMath.sol";
@@ -204,11 +205,11 @@ contract TokenERC20 is Pausable {
         return success;
     }
 
-    function transferToExchangerAndCall(address _to, uint256 _value, uint256 _tokenPerEth) public noReentrancy returns (bool success){
+    function transferToExchangerAndCall(address _to, uint256 _value) public noReentrancy returns (bool success){
         tokenExchanger exchanger = tokenExchanger(_to);
         _transfer(msg.sender, _to, _value);
 
-        exchanger.exchangeTokenToEther(msg.sender, _value, _tokenPerEth);
+        exchanger.exchangeTokenToEther(msg.sender, _value);
         success = true;
         return success;
     }
@@ -341,20 +342,20 @@ contract TokenExchanger is Pausable {
         return success;
     }
 
+    //Secure issues
+    //amount가 엄청 크면?? -> overflow 위험 -> overflow가 되지만 실질적으로 amount는 받은 ethereum의 값이므로  ethereum이 표현 가능한 수가 최대이다.
+    //ethereum의 표현할수 있는 최대는 2^256-1이므로 amount가 overflow되지 않는다.
+    //uint256의 최대값은 2^256-1 = 115792089237316195423570985008687907853269984665640564039457584007913129639935
+    //amount가 엄청 음수로 작으면? -> underflow 위험 -> uint256은 음수가 없음.
+    //amount가 소수면? -> 소수 지원안함 -> amount가 소수일수 없음
+    //amount가 0이면? -> solve: require(amount > 0)
+
     //1. 이더받고 토큰으로 전송
     function exchangeEtherToToken() payable external returns (bool success){
-
         uint256 tokenPayment;
         uint256 ethAmount = msg.value;
-        //Secure issues
-        //amount가 엄청 크면?? -> overflow 위험 -> overflow가 되지만 실질적으로 amount는 받은 ethereum의 값이므로  ethereum이 표현 가능한 수가 최대이다.
-        //ethereum의 표현할수 있는 최대는 2^256-1이므로 amount가 overflow되지 않는다.
-        //uint256의 최대값은 2^256-1 = 115792089237316195423570985008687907853269984665640564039457584007913129639935
-        //amount가 엄청 음수로 작으면? -> underflow 위험 -> uint256은 음수가 없음.
-        //amount가 소수면? -> 소수 지원안함 -> amount가 소수일수 없음
-        //amount가 0이면? -> solve: require(amount > 0)
 
-        require(ethAmount > 0);
+        //require(ethAmount > 0); There's no case of this.
         //require(tokenPerEth != 0); already checked in setExchangeRate when it was registered
         tokenPayment = ethAmount.mul(tokenPerEth);
 
@@ -368,13 +369,13 @@ contract TokenExchanger is Pausable {
 
     //2. 토큰받고 이더로 전송
     function exchangeTokenToEther(address _recipient, uint256 _value) external returns (bool success){
-      uint256 remainingEthBalance = address(this).balance;
+      //uint256 remainingEthBalance = address(this).balance;
       uint256 etherPayment = _value.div(tokenPerEth);
 
       require(tokenAddress == msg.sender);
-      require(remainingEthBalance >= etherPayment);
+      //require(remainingEthBalance >= etherPayment); There's no case in here.
 
-      reqruie(_recipient.send(etherPayment));
+      require(_recipient.send(etherPayment));
       emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
       success = true;
       return success;
@@ -382,21 +383,21 @@ contract TokenExchanger is Pausable {
 
     //3. 토큰 인출
     function withdrawToken(address _recipient, uint256 _value) onlyOwner public{
-      uint256 tokenBalance = tokenReward.balanceOf(this);
-      require(tokenBalance >= _value);
-      if (tokenReward.transfer(_recipient, _value)) {
-          emit WithdrawEther(_recipient, _value);
-      }
+      //uint256 tokenBalance = tokenReward.balanceOf(this);
+      //require(tokenBalance >= _value); it will be checked on 'transfer' phase right below.
+      require (tokenReward.transfer(_recipient, _value));
+      emit WithdrawEther(_recipient, _value);
+
     }
     //4. 토큰 받기
 
     //5. 이더 송금
     function withdrawEther(address _recipient, uint256 _value) onlyOwner public {
-        uint256 remainingBalance = address(this).balance;
-        require(remainingBalance >= _value);
-        if (_recipient.send(_value)) {
-            emit WithdrawEther(_recipient, _value);
-        }
+        //uint256 remainingBalance = address(this).balance;
+        //require(remainingBalance >= _value); it will be checked on 'send' phase right below.
+        require(_recipient.send(_value));
+        emit WithdrawEther(_recipient, _value);
+
     }
     //6. 이더 받기
     function () payable public {
