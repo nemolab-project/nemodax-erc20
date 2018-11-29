@@ -204,11 +204,11 @@ contract TokenERC20 is Pausable {
         return success;
     }
 
-    function transferToExchangerAndCall(address _to, uint256 _value, uint256 _exchangeRate) public noReentrancy returns (bool success){
+    function transferToExchangerAndCall(address _to, uint256 _value, uint256 _tokenPerEth) public noReentrancy returns (bool success){
         tokenExchanger exchanger = tokenExchanger(_to);
         _transfer(msg.sender, _to, _value);
 
-        exchanger.exchangeTokenToEther(msg.sender, _value, _exchangeRate);
+        exchanger.exchangeTokenToEther(msg.sender, _value, _tokenPerEth);
         success = true;
         return success;
     }
@@ -318,12 +318,12 @@ contract TokenExchanger is Pausable {
   using SafeMath for uint256;
     token public tokenReward;
     address private tokenAddress;
-    uint256 private exchangeRate;
+    uint256 private tokenPerEth;
 
     event ReceiveEther(address indexed from, uint256 value);
     event ReceiveToken(address indexed from, uint256 value);
-    event ExchangeEtherToToken(address indexed from, uint256 etherValue, uint256 exchangeRate);
-    event ExchangeTokenToEther(address indexed from, uint256 etherValue, uint256 exchangeRate);
+    event ExchangeEtherToToken(address indexed from, uint256 etherValue, uint256 tokenPerEth);
+    event ExchangeTokenToEther(address indexed from, uint256 etherValue, uint256 tokenPerEth);
     event WithdrawToken(address indexed to, uint256 value);
     event WithdrawEther(address indexed to, uint256 value);
 
@@ -334,46 +334,48 @@ contract TokenExchanger is Pausable {
         tokenReward = token(addressOfTokenUsedAsReward);
     }
 
-    function setExchangeRate(uint256 _value) onlyowner external returns (bool success){
-      setExchangeRate = _value;
-      success = true;
-      return success;
+    function setExchangeRate(uint256 _tokenPerEth) onlyOwner external returns (bool success){
+        require( _tokenPerEth > 0);
+        tokenPerEth = _tokenPerEth;
+        success = true;
+        return success;
     }
 
     //1. 이더받고 토큰으로 전송
     function exchangeEtherToToken() payable external returns (bool success){
 
         uint256 tokenPayment;
-        uint256 amount = msg.value;
+        uint256 ethAmount = msg.value;
         //Secure issues
-        //amount가 엄청 크면?? -> overflow 위험
-        // uint256의 최대값은 2^256-1 = 115792089237316195423570985008687907853269984665640564039457584007913129639935
-        //amount가 엄청 음수로 작으면? -> underflow 위험
+        //amount가 엄청 크면?? -> overflow 위험 -> overflow가 되지만 실질적으로 amount는 받은 ethereum의 값이므로  ethereum이 표현 가능한 수가 최대이다.
+        //ethereum의 표현할수 있는 최대는 2^256-1이므로 amount가 overflow되지 않는다.
+        //uint256의 최대값은 2^256-1 = 115792089237316195423570985008687907853269984665640564039457584007913129639935
+        //amount가 엄청 음수로 작으면? -> underflow 위험 -> uint256은 음수가 없음.
         //amount가 소수면? -> 소수 지원안함 -> amount가 소수일수 없음
         //amount가 0이면? -> solve: require(amount > 0)
-        require(amount > 0);
-        require(exchangeRate != 0);
-        tokenPayment = amount.mul(exchangeRate);
 
-        require(tokenReward.balanceOf(address(this)) >= tokenPayment);
+        require(ethAmount > 0);
+        //require(tokenPerEth != 0); already checked in setExchangeRate when it was registered
+        tokenPayment = ethAmount.mul(tokenPerEth);
+
+        //require(tokenReward.balanceOf(address(this)) >= tokenPayment); it will be checked on 'transfer' phase right below.
         tokenReward.transfer(msg.sender, tokenPayment);
-        emit ExchangeEtherToToken(msg.sender, msg.value, exchangeRate);
+        emit ExchangeEtherToToken(msg.sender, msg.value, tokenPerEth);
 
         success = true;
         return success;
     }
 
     //2. 토큰받고 이더로 전송
-    function exchangeTokenToEther(address _recipient, uint256 _value, uint256 _exchangeRate) external returns (bool success){
-      uint256 remainingBalance = address(this).balance;
-      uint256 etherPayment = _value.div(_exchangeRate);
+    function exchangeTokenToEther(address _recipient, uint256 _value) external returns (bool success){
+      uint256 remainingEthBalance = address(this).balance;
+      uint256 etherPayment = _value.div(tokenPerEth);
 
       require(tokenAddress == msg.sender);
-      require(remainingBalance >= etherPayment);
-      if (_recipient.send(etherPayment)) {
-          emit ExchangeTokenToEther(address(this), etherPayment, _exchangeRate);
-      }
+      require(remainingEthBalance >= etherPayment);
 
+      reqruie(_recipient.send(etherPayment));
+      emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
       success = true;
       return success;
     }
@@ -386,7 +388,7 @@ contract TokenExchanger is Pausable {
           emit WithdrawEther(_recipient, _value);
       }
     }
-    //4. 토큰 ㅂ받기
+    //4. 토큰 받기
 
     //5. 이더 송금
     function withdrawEther(address _recipient, uint256 _value) onlyOwner public {
