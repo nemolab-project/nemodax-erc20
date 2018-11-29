@@ -318,6 +318,7 @@ contract TokenExchanger is Pausable {
   using SafeMath for uint256;
     token public tokenReward;
     address private tokenAddress;
+    uint256 private exchangeRate;
 
     event ReceiveEther(address indexed from, uint256 value);
     event ReceiveToken(address indexed from, uint256 value);
@@ -333,19 +334,30 @@ contract TokenExchanger is Pausable {
         tokenReward = token(addressOfTokenUsedAsReward);
     }
 
+    function setExchangeRate(uint256 _value) onlyowner external returns (bool success){
+      setExchangeRate = _value;
+      success = true;
+      return success;
+    }
+
     //1. 이더받고 토큰으로 전송
-    function exchangeEtherToToken(uint256 _exchangeRate) payable external returns (bool success){
+    function exchangeEtherToToken() payable external returns (bool success){
 
         uint256 tokenPayment;
         uint256 amount = msg.value;
-
+        //Secure issues
+        //amount가 엄청 크면?? -> overflow 위험
+        // uint256의 최대값은 2^256-1 = 115792089237316195423570985008687907853269984665640564039457584007913129639935
+        //amount가 엄청 음수로 작으면? -> underflow 위험
+        //amount가 소수면? -> 소수 지원안함 -> amount가 소수일수 없음
+        //amount가 0이면? -> solve: require(amount > 0)
         require(amount > 0);
-        require(_exchangeRate != 0);
-        tokenPayment = amount.mul(_exchangeRate);
+        require(exchangeRate != 0);
+        tokenPayment = amount.mul(exchangeRate);
 
         require(tokenReward.balanceOf(address(this)) >= tokenPayment);
         tokenReward.transfer(msg.sender, tokenPayment);
-        emit ExchangeEtherToToken(msg.sender, msg.value, _exchangeRate);
+        emit ExchangeEtherToToken(msg.sender, msg.value, exchangeRate);
 
         success = true;
         return success;
