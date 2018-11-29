@@ -1,3 +1,4 @@
+// contract version 0.0.2 
 pragma solidity ^0.4.21;
 
 import "./SafeMath.sol";
@@ -374,7 +375,7 @@ contract TokenExchanger is Pausable {
       require(tokenAddress == msg.sender);
       require(remainingEthBalance >= etherPayment);
 
-      reqruie(_recipient.send(etherPayment));
+      require(_recipient.send(etherPayment));
       emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
       success = true;
       return success;
@@ -382,21 +383,21 @@ contract TokenExchanger is Pausable {
 
     //3. 토큰 인출
     function withdrawToken(address _recipient, uint256 _value) onlyOwner public{
-      uint256 tokenBalance = tokenReward.balanceOf(this);
-      require(tokenBalance >= _value);
-      if (tokenReward.transfer(_recipient, _value)) {
-          emit WithdrawEther(_recipient, _value);
-      }
+      //uint256 tokenBalance = tokenReward.balanceOf(this);
+      //require(tokenBalance >= _value); it will be checked on 'transfer' phase right below.
+      require (tokenReward.transfer(_recipient, _value));
+      emit WithdrawEther(_recipient, _value);
+
     }
     //4. 토큰 받기
 
     //5. 이더 송금
     function withdrawEther(address _recipient, uint256 _value) onlyOwner public {
-        uint256 remainingBalance = address(this).balance;
-        require(remainingBalance >= _value);
-        if (_recipient.send(_value)) {
-            emit WithdrawEther(_recipient, _value);
-        }
+        //uint256 remainingBalance = address(this).balance;
+        //require(remainingBalance >= _value); it will be checked on 'send' phase right below.
+        require(_recipient.send(_value));
+        emit WithdrawEther(_recipient, _value);
+
     }
     //6. 이더 받기
     function () payable public {
