@@ -1,4 +1,4 @@
-// contract version 0.0.2
+// contract version 0.0.3
 pragma solidity ^0.4.21;
 
 import "./SafeMath.sol";
@@ -64,7 +64,7 @@ interface tokenRecipient {
 }
 
 interface tokenExchanger {
-  function exchangeTokenToEther(address _recipient, uint256 _value, uint256 _exchangeRate) external returns (bool success);
+  function exchangeTokenToEther(address _recipient, uint256 _value) external returns (bool success);
   // function withdrawEther(address _recipient, uint256 _value) external;
 }
 
@@ -335,6 +335,7 @@ contract TokenExchanger is Pausable {
         tokenReward = token(addressOfTokenUsedAsReward);
     }
 
+
     function setExchangeRate(uint256 _tokenPerEth) onlyOwner external returns (bool success){
         require( _tokenPerEth > 0);
         tokenPerEth = _tokenPerEth;
@@ -355,8 +356,8 @@ contract TokenExchanger is Pausable {
         uint256 tokenPayment;
         uint256 ethAmount = msg.value;
 
-        //require(ethAmount > 0); There's no case of this.
-        //require(tokenPerEth != 0); already checked in setExchangeRate when it was registered
+        require(ethAmount > 0);
+        require(tokenPerEth != 0);
         tokenPayment = ethAmount.mul(tokenPerEth);
 
         //require(tokenReward.balanceOf(address(this)) >= tokenPayment); it will be checked on 'transfer' phase right below.
@@ -369,11 +370,11 @@ contract TokenExchanger is Pausable {
 
     //2. 토큰받고 이더로 전송
     function exchangeTokenToEther(address _recipient, uint256 _value) external returns (bool success){
-      //uint256 remainingEthBalance = address(this).balance;
-      uint256 etherPayment = _value.div(tokenPerEth);
-
       require(tokenAddress == msg.sender);
-      //require(remainingEthBalance >= etherPayment); There's no case in here.
+
+      uint256 remainingEthBalance = address(this).balance;
+      uint256 etherPayment = _value.div(tokenPerEth);
+      require(remainingEthBalance >= etherPayment);
 
       require(_recipient.send(etherPayment));
       emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
