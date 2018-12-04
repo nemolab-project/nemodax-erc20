@@ -336,7 +336,7 @@ contract TokenExchanger is Pausable {
     event WithdrawEther(address indexed to, uint256 value);
 
     constructor(
-        address _addressOfTokenUsedAsReward // nemo token contract
+        address _addressOfTokenUsedAsReward; // nemo token contract
         uint _tokenPerEth;
     ) public {
         require(_tokenPerEth > 0);
