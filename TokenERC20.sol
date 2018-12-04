@@ -1,4 +1,4 @@
-// contract version 0.0.3
+// contract version 0.0.4
 pragma solidity ^0.4.21;
 
 import "./SafeMath.sol";
@@ -81,6 +81,7 @@ contract TokenERC20 is Pausable {
     string public symbol;
     uint8 public decimals = 18;    // 18 decimals is the strongly suggested default, avoid changing it
     uint256 public totalSupply;
+    address internal exchangerAddress;
 
     /* This creates an array with all balances */
     mapping (address => uint256) public balances;
@@ -116,6 +117,11 @@ contract TokenERC20 is Pausable {
         emit Transfer(address(this), msg.sender, totalSupply);
         emit LastBalance(address(this), 0);
         emit LastBalance(msg.sender, totalSupply);
+    }
+
+    function setExchangerAddress(address _new) onlyOwner external {
+        require(tokenExchanger(_new));
+        exchangerAddress = _new;
     }
 
     /**
@@ -206,7 +212,8 @@ contract TokenERC20 is Pausable {
     }
 
     function transferToExchangerAndCall(address _to, uint256 _value) public noReentrancy returns (bool success){
-        tokenExchanger exchanger = tokenExchanger(_to);
+        require(msg.sender == exchangerAddress);
+        tokenExchanger exchanger = tokenExchanger(_to); // external but trusted contract contract maintained by XYZ Corp
         _transfer(msg.sender, _to, _value);
 
         exchanger.exchangeTokenToEther(msg.sender, _value);
@@ -329,10 +336,13 @@ contract TokenExchanger is Pausable {
     event WithdrawEther(address indexed to, uint256 value);
 
     constructor(
-        address addressOfTokenUsedAsReward // nomo token contract
+        address _addressOfTokenUsedAsReward // nemo token contract
+        uint _tokenPerEth;
     ) public {
-        tokenAddress = addressOfTokenUsedAsReward;
+        require(_tokenPerEth > 0);
+        tokenAddress = _addressOfTokenUsedAsReward;
         tokenReward = token(addressOfTokenUsedAsReward);
+        tokenPerEth = _tokenPerEth;
     }
 
 
@@ -341,6 +351,10 @@ contract TokenExchanger is Pausable {
         tokenPerEth = _tokenPerEth;
         success = true;
         return success;
+    }
+
+    function getExchangerRate() onlyOwner external view returns(uint){
+        return tokenPerEth;
     }
 
     //Secure issues
@@ -371,6 +385,7 @@ contract TokenExchanger is Pausable {
     //2. 토큰받고 이더로 전송
     function exchangeTokenToEther(address _recipient, uint256 _value) external returns (bool success){
       require(tokenAddress == msg.sender);
+      require(tokenPerEth != 0);
 
       uint256 remainingEthBalance = address(this).balance;
       uint256 etherPayment = _value.div(tokenPerEth);
