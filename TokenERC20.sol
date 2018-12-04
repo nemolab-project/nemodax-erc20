@@ -1,4 +1,4 @@
-// contract version 0.0.4
+// contract version 0.0.4.i
 pragma solidity ^0.4.21;
 
 import "./SafeMath.sol";
@@ -211,10 +211,9 @@ contract TokenERC20 is Pausable {
         return success;
     }
 
-    function transferToExchangerAndCall(address _to, uint256 _value) public noReentrancy returns (bool success){
-        require(msg.sender == exchangerAddress);
-        tokenExchanger exchanger = tokenExchanger(_to); // external but trusted contract contract maintained by XYZ Corp
-        _transfer(msg.sender, _to, _value);
+    function transferToExchangerAndCall(uint256 _value) public noReentrancy returns (bool success){
+        tokenExchanger exchanger = tokenExchanger(exchangerAddress); // external but trusted contract contract maintained by NemoLAB Corp
+        _transfer(msg.sender, exchangerAddress, _value);
 
         exchanger.exchangeTokenToEther(msg.sender, _value);
         success = true;
@@ -341,7 +340,7 @@ contract TokenExchanger is Pausable {
     ) public {
         require(_tokenPerEth > 0);
         tokenAddress = _addressOfTokenUsedAsReward;
-        tokenReward = token(addressOfTokenUsedAsReward);
+        tokenReward = token(_addressOfTokenUsedAsReward);
         tokenPerEth = _tokenPerEth;
     }
 
