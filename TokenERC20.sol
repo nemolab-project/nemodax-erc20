@@ -1,5 +1,5 @@
-// contract version 0.0.4.i
-pragma solidity ^0.4.21;
+// contract version 0.1.0
+pragma solidity ^0.4.25;
 
 import "./SafeMath.sol";
 
@@ -120,8 +120,11 @@ contract TokenERC20 is Pausable {
     }
 
     function setExchangerAddress(address _new) onlyOwner external {
-        require(tokenExchanger(_new));
         exchangerAddress = _new;
+    }
+
+    function getExchangerAddress() onlyOwner external view returns(address) {
+        return exchangerAddress;
     }
 
     /**
