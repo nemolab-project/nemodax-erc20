@@ -1,0 +1,45 @@
+//v.0.0.1 Test for storing data on blockchain
+
+pragma solidity ^0.4.25;
+
+import "./TokenERC20.sol";
+
+contract TradingBook is Pausable {
+
+    struct Deal {
+        uint256 dealNo;
+        uint256 price;
+        string buyer;
+        //string seller;
+    }
+    mapping (uint256 => Deal[]) public dealsWithNo;
+    mapping (uint256 => Deal[]) public dealsWithPrice;
+
+    Deal[] public cart;
+
+    function recordDeal(uint256 _dealNo, uint256 _price, string _buyer) onlyOwner external {
+        Deal memory newData = Deal(_dealNo, _price, _buyer);
+
+        dealsWithNo[_dealNo].push(newData);
+        dealsWithPrice[_price].push(newData);
+    }
+
+    function getDealWithNo(uint256 _dealNo) view external returns (uint256 , uint256, string){
+        return (dealsWithNo[_dealNo][0].dealNo, dealsWithNo[_dealNo][0].price, dealsWithNo[_dealNo][0].buyer);
+    }
+
+    function getDealWithPrice(uint256 _price) external view returns (uint256, uint256){
+        uint i;
+        uint length = dealsWithPrice[_price].length;
+
+        Deal[] memory resBuf = new Deal[](length);
+
+        for(i=0; i<length; i++) {
+            resBuf[i] = dealsWithPrice[_price][i];
+        }
+
+        return (dealsWithPrice[_price][0].dealNo, dealsWithPrice[_price][0].price);
+    }
+    //... it might that there are more getDealwithsomething functions...
+
+}
