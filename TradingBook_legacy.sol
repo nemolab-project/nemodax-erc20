@@ -6,12 +6,14 @@ import "./TokenERC20.sol";
 
 contract TradingBook is Pausable {
 
-    struct Deal {
-        uint256 dealNo;
-        uint256 price;
-        string buyer;
-        //string seller;
-    }
+  // 29byte
+  struct Deal {
+      uint64 dealNo; // 0 ~ 1.844674407370955e19  8byte 하루에 100조건 거래일때 500년간 거래량 => 1.825 * 10^19
+      uint104 price; // 0 ~ 2.028240960365167e31  13byte 10^13 * 10^18 소숫점 18자리까지 표현 가능한 코인 10조개까지 표현가능
+      uint32 buyer; // 0 ~ 4294967296 42억        4byte
+      uint32 seller; //                           4byte
+  }
+
     mapping (uint256 => Deal[]) public dealsWithNo;
     mapping (uint256 => Deal[]) public dealsWithPrice;
 
