@@ -1,17 +1,19 @@
-// contract version 0.2.1
+// contract version 0.2.2
 // storage 컨트랙을 추가해서 TokenExchanger와 proxy 변수 slot 구조 동일하게 맞춤
 // owner외에 init 시도시 실패 확인
 // 이더 입금 & 출금 정상 확인
 // 코인 정상 송금 확인
-// 코인 입금 & 출금 정상 확
-// 
+// owner외에 이더 & 코인 출금 시도시 실패 확인
+// 코인 입금 & 출금 정상 확인
+// 코인 잔액보다 많이 출금 시도시 실패 확인
+
 
 pragma solidity ^0.4.25;
-//pragma solidity ^0.5.1;
+
 import "./SafeMath.sol";
 
 contract Ownable {
-    address public owner;
+    address internal owner;
 
     /* you have to use this contract to be inherited because it is internal.*/
     constructor() internal {
@@ -407,6 +409,8 @@ contract TokenExchanger is TokenERC20{
 }
 
 contract NemodaxStorage is Ownable{
+
+    //Never ever change the order of variables below!!!!
     bool internal paused;
 
     // Public variables of the token
@@ -420,7 +424,7 @@ contract NemodaxStorage is Ownable{
     mapping (address => mapping (address => uint256)) public allowed;
     mapping (address => bool) public frozenAccount;
 
-    uint256 private tokenPerEth;
+    uint256 public tokenPerEth;
 
     constructor() Ownable() internal {}
 
@@ -430,13 +434,15 @@ contract NemodaxStorage is Ownable{
 contract ProxyNemodax is NemodaxStorage  {
 
     address private implementation;
+    event Upgraded(address newContract);
 
-
-    function setAddress(address _addr) external {
+    function upgrade(address _addr) external {
+        require(implementation != _addr);
         implementation = _addr;
+        emit Upgraded(implementation);
     }
     //when it will be released, will be deleted.
-    function getAddress() public view returns (address){
+    function runningAddress() onlyOwner external view returns (address){
         return implementation;
     }
 
