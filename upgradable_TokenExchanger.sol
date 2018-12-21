@@ -1,10 +1,17 @@
-// contract version 0.2.0.i
+// contract version 0.2.1
+// storage 컨트랙을 추가해서 TokenExchanger와 proxy 변수 slot 구조 동일하게 맞춤
+// owner외에 init 시도시 실패 확인
+// 이더 입금 & 출금 정상 확인
+// 코인 정상 송금 확인
+// 코인 입금 & 출금 정상 확
+// 
+
 pragma solidity ^0.4.25;
 //pragma solidity ^0.5.1;
 import "./SafeMath.sol";
 
 contract Ownable {
-    address internal owner;
+    address public owner;
 
     /* you have to use this contract to be inherited because it is internal.*/
     constructor() internal {
@@ -73,7 +80,6 @@ contract TokenERC20 is Pausable {
     string public symbol;
     uint8 public decimals = 18;    // 18 decimals is the strongly suggested default, avoid changing it
     uint256 public totalSupply;
-    address internal exchangerAddress;
 
     /* This creates an array with all balances */
     mapping (address => uint256) public balances;
@@ -106,23 +112,17 @@ contract TokenERC20 is Pausable {
         string _tokenName,
         string _tokenSymbol,
         uint256 _initialSupply
-    ) public {
+    ) public onlyOwner {
         name = _tokenName;                                       // Set the name for display purposes
         symbol = _tokenSymbol;                                   // Set the symbol for display purposes
         totalSupply = convertToDecimalUnits(_initialSupply);     // Update total supply with the decimal amount
         balances[msg.sender] = totalSupply;                     // Give the creator all initial tokens
+
         emit Transfer(address(this), msg.sender, totalSupply);
         emit LastBalance(address(this), 0);
         emit LastBalance(msg.sender, totalSupply);
     }
 
-    function setExchangerAddress(address _new) onlyOwner external {
-        exchangerAddress = _new;
-    }
-
-    function getExchangerAddress() onlyOwner external view returns(address) {
-        return exchangerAddress;
-    }
 
     /**
      * Convert tokens units to token decimal units
@@ -310,10 +310,10 @@ contract TokenExchanger is TokenERC20{
         string _tokenSymbol,
         uint256 _initialSupply,
         uint _tokenPerEth
-    ) public {
-        super.initToken(_tokenName, _tokenSymbol, _initialSupply);
-
+    ) public onlyOwner {
         require(_tokenPerEth > 0);
+
+        super.initToken(_tokenName, _tokenSymbol, _initialSupply);
         tokenPerEth = _tokenPerEth;
     }
 
@@ -378,6 +378,7 @@ contract TokenExchanger is TokenERC20{
     }
 
 
+
     /**
      * Destroy this contract
      *
@@ -405,30 +406,61 @@ contract TokenExchanger is TokenERC20{
 
 }
 
+contract NemodaxStorage is Ownable{
+    bool internal paused;
 
-contract ProxyNemodax {
+    // Public variables of the token
+    string public name;
+    string public symbol;
+    uint8 public decimals = 18;    // 18 decimals is the strongly suggested default, avoid changing it
+    uint256 public totalSupply;
+
+    /* This creates an array with all balances */
+    mapping (address => uint256) public balances;
+    mapping (address => mapping (address => uint256)) public allowed;
+    mapping (address => bool) public frozenAccount;
+
+    uint256 private tokenPerEth;
+
+    constructor() Ownable() internal {}
+
+}
+
+
+contract ProxyNemodax is NemodaxStorage  {
 
     address private implementation;
+
 
     function setAddress(address _addr) external {
         implementation = _addr;
     }
+    //when it will be released, will be deleted.
+    function getAddress() public view returns (address){
+        return implementation;
+    }
 
-    function () external {
+    function () payable external {
         address localImpl = implementation;
         require(localImpl != address(0));
 
         assembly {
             let ptr := mload(0x40)
-            calldatacopy(ptr, 0, calldatasize)
-            let result := delegatecall(gas, localImpl, ptr, calldatasize, 0, 0)
-            let size := returndatasize
-            returndatacopy(ptr, 0, size)
-            switch result
 
-            case 0 { revert(ptr, size) }
-            default { return(ptr, size) }
+            switch calldatasize
+            case 0 {  } // just to receive ethereum
+
+            default{
+                calldatacopy(ptr, 0, calldatasize)
+
+                let result := delegatecall(gas, localImpl, ptr, calldatasize, 0, 0)
+                let size := returndatasize
+                returndatacopy(ptr, 0, size)
+                switch result
+
+                case 0 { revert(ptr, size) }
+                default { return(ptr, size) }
+            }
         }
     }
-
 }
