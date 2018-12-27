@@ -1,13 +1,21 @@
-// contract version 0.2.3
-// storage 컨트랙을 추가해서 TokenExchanger와 proxy 변수 slot 구조 동일하게 맞춤
-// owner외에 init 시도시 실패 확인
-// 이더 입금 & 출금 정상 확인
-// 코인 정상 송금 확인
-// owner외에 이더 & 코인 출금 시도시 실패 확인
-// 코인 입금 & 출금 정상 확인
-// 코인 잔액보다 많이 출금 시도시 실패 확인
+// contract version 0.2.4
+// solidity version update 0.4.25 => 0.5.2
 
-pragma solidity ^0.4.25;
+// 마스터 계정 init 성공
+// 이더 잔액 확인 성공
+// 코인 잔액 확인 성공
+// 마스터 => 일반 계정 송금 성공
+// 일반 계정 => 일반 계정 송금 성공
+// 사용자 / 마스터 계정 언락 성공
+// 환율 마스터 계정만 환율 확인 안됨 성공
+// 환율 마스터 계정만 변경 성공
+// 이더 -> 코인 교환 성공
+// 코인 -> 이더 교환 성공
+// 코인 출금 마스터만 성공
+// 이더 출금 마스터만 성공
+
+
+pragma solidity ^0.5.2;
 
 
 /**
@@ -61,7 +69,7 @@ library SafeMath {
 }
 
 contract Ownable {
-    address internal owner;
+    address payable internal owner;
 
     /* you have to use this contract to be inherited because it is internal.*/
     constructor() internal {
@@ -73,7 +81,7 @@ contract Ownable {
         _;
     }
 
-    function transferOwnership(address newOwner) onlyOwner public {
+    function transferOwnership(address payable newOwner) onlyOwner public {
         owner = newOwner;
     }
 
@@ -159,10 +167,10 @@ contract TokenERC20 is Pausable {
      */
 
     function initToken(
-        string _tokenName,
-        string _tokenSymbol,
+        string memory _tokenName,
+        string memory _tokenSymbol,
         uint256 _initialSupply
-    ) public onlyOwner {
+    ) internal onlyOwner {
         name = _tokenName;                                       // Set the name for display purposes
         symbol = _tokenSymbol;                                   // Set the symbol for display purposes
         totalSupply = convertToDecimalUnits(_initialSupply);     // Update total supply with the decimal amount
@@ -213,7 +221,7 @@ contract TokenERC20 is Pausable {
      * Internal transfer, only can be called by this contract
      */
     function _transfer(address _from, address _to, uint256 _value) internal {
-        require(_to != 0x0);                                            // Prevent transfer to 0x0 address. Use burn() instead
+        require(_to != address(0x0));                                            // Prevent transfer to 0x0 address. Use burn() instead
         require(balances[_from] >= _value);                             // Check if the sender has enough
         require(!frozenAccount[_from]);                                 // Check if sender is frozen
         require(!frozenAccount[_to]);                                   // Check if recipient is frozen
@@ -356,11 +364,11 @@ contract TokenExchanger is TokenERC20{
 
 
     function initExchanger(
-        string _tokenName,
-        string _tokenSymbol,
+        string calldata _tokenName,
+        string calldata _tokenSymbol,
         uint256 _initialSupply,
         uint _tokenPerEth
-    ) public onlyOwner {
+    ) external onlyOwner {
         require(_tokenPerEth > 0);
 
         super.initToken(_tokenName, _tokenSymbol, _initialSupply);
@@ -388,7 +396,7 @@ contract TokenExchanger is TokenERC20{
         require(tokenPerEth != 0);
         tokenPayment = ethAmount.mul(tokenPerEth);
 
-        super._transfer(this, msg.sender, tokenPayment);
+        super._transfer(address(this), msg.sender, tokenPayment);
 
         emit ExchangeEtherToToken(msg.sender, msg.value, tokenPerEth);
 
@@ -397,14 +405,14 @@ contract TokenExchanger is TokenERC20{
     }
 
     //2. 토큰받고 이더로 전송
-    function exchangeTokenToEther(address _recipient, uint256 _value) external noReentrancy returns (bool success){
+    function exchangeTokenToEther(address payable _recipient, uint256 _value) external noReentrancy returns (bool success){
       require(tokenPerEth != 0);
 
       uint256 remainingEthBalance = address(this).balance;
       uint256 etherPayment = _value.div(tokenPerEth);
       require(remainingEthBalance >= etherPayment);
 
-      super._transfer(msg.sender, this, _value);
+      super._transfer(msg.sender, address(this), _value);
       require(_recipient.send(etherPayment));
 
       emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
@@ -413,15 +421,15 @@ contract TokenExchanger is TokenERC20{
     }
 
     //3. 토큰 인출
-    function withdrawToken(address _recipient, uint256 _value) onlyOwner public{
-      super._transfer(this,_recipient, _value);
+    function withdrawToken(address _recipient, uint256 _value) onlyOwner noReentrancy public{
+      super._transfer(address(this) ,_recipient, _value);
       emit WithdrawEther(_recipient, _value);
 
     }
     //4. 토큰 받기
 
     //5. 이더 송금
-    function withdrawEther(address _recipient, uint256 _value) onlyOwner public {
+    function withdrawEther(address payable _recipient, uint256 _value) onlyOwner noReentrancy public {
         require(_recipient.send(_value));
         emit WithdrawEther(_recipient, _value);
 
@@ -447,12 +455,11 @@ contract TokenExchanger is TokenERC20{
      *
      * @param _recipient Address to receive the funds
      */
-    function destroyAndSend(address _recipient) public onlyOwner {
-        uint256 tokenBalance = super.balanceOf(this);
+    function destroyAndSend(address payable _recipient) public onlyOwner {
+        uint256 tokenBalance = super.balanceOf(address(this));
         require(tokenBalance == 0); // Check if this contract have remaining tokens
         selfdestruct(_recipient);
     }
-
 
 }
 
