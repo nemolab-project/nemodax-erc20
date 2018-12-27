@@ -1,4 +1,4 @@
-// contract version 0.2.4
+// contract version 0.2.5
 // solidity version update 0.4.25 => 0.5.2
 
 // 마스터 계정 init 성공
@@ -13,7 +13,6 @@
 // 코인 -> 이더 교환 성공
 // 코인 출금 마스터만 성공
 // 이더 출금 마스터만 성공
-
 
 pragma solidity ^0.5.2;
 
@@ -405,7 +404,7 @@ contract TokenExchanger is TokenERC20{
     }
 
     //2. 토큰받고 이더로 전송
-    function exchangeTokenToEther(address payable _recipient, uint256 _value) external noReentrancy returns (bool success){
+    function exchangeTokenToEther(uint256 _value) external noReentrancy returns (bool success){
       require(tokenPerEth != 0);
 
       uint256 remainingEthBalance = address(this).balance;
@@ -413,7 +412,7 @@ contract TokenExchanger is TokenERC20{
       require(remainingEthBalance >= etherPayment);
 
       super._transfer(msg.sender, address(this), _value);
-      require(_recipient.send(etherPayment));
+      require(address(msg.sender).send(etherPayment));
 
       emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
       success = true;
