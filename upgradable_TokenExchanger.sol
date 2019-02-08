@@ -1,18 +1,35 @@
-// contract version 0.2.5
-// solidity version update 0.4.25 => 0.5.2
+// contract version 0.2.6
+// upgrade 함수 onlyOwner로 변경하여 마스터 계정만 컨트랙트 수정이 가능토록 변경함.
 
-// 마스터 계정 init 성공
-// 이더 잔액 확인 성공
-// 코인 잔액 확인 성공
-// 마스터 => 일반 계정 송금 성공
-// 일반 계정 => 일반 계정 송금 성공
-// 사용자 / 마스터 계정 언락 성공
-// 환율 마스터 계정만 환율 확인 안됨 성공
-// 환율 마스터 계정만 변경 성공
-// 이더 -> 코인 교환 성공
-// 코인 -> 이더 교환 성공
-// 코인 출금 마스터만 성공
-// 이더 출금 마스터만 성공
+// v0.2.6 버전 추가 테스트 내용
+// 1. 일반계정은 재 init 정상 실패 확인, 단 마스터 계정은 재 init이 가능하기 때문에 꼭! 다시 init하지 않도록 각별히 주의할것
+// 2. 마스터가 아닌 일반계정으로 컨트랙트 변경(업그레이드) 시도시 정상 실패 확인
+// 3. 일반계정 transferFrom 성공확인(approve, allowance 정상 동작 확인 포함)
+// 4. Exchanger 컨트랙트 수정은 가능하나 새로운 변수를 추가하는 것은 불가함.
+//    실제 저장은 ProxyNemodax에 되며 상속하고 있는 NemodaxStorage에 등록되어 있는 변수만 사용 가능하기 때문에
+//    NemodaxStorage 를 수정후 ProxyNemodax를 재배포하지 않는한
+//    Exchanger 또는 ERC20 컨트랙트에 변수를 추가한다 하여도 사용이 불가함.
+// 5. 마스터계정에 의한 freeze시 송금 불가 확인 / unfreeze시 송금 가능 확인
+// 6. pause/unpause 기능 정상작동 확인 (transfer, transferFrom, approve, exchangeEtherToToken 등등 사용불가 확인.)
+// 
+
+
+// v0.2.5 테스트 내용
+// 1. 마스터 계정 init 성공 (일반계정은 재 init 실패, 단 마스터 계정은 재 init이 가능하기 때문에 꼭! 다시 init하지 않도록 각별히 주의할것)
+// 2. 이더 잔액 확인 성공
+// 3. 코인 잔액 확인 성공
+// 4. 마스터 => 일반 계정 송금 성공
+// 5. 일반 계정 => 일반 계정 송금 성공
+// 6. 사용자 / 마스터 계정 언락 성공
+// 7. 환율 마스터 계정만 환율 확인 안됨 성공
+// 8. 환율 마스터 계정만 변경 성공
+// 9. 이더 -> 코인 교환 성공
+// 10. 코인 -> 이더 교환 성공
+// 11. 코인 출금 마스터만 성공
+// 12. 이더 출금 마스터만 성공
+// 13. Exchanger 컨트랙트 교체/수정시 사용하던 코인정보가(계좌 잔액들, 코인 메타 정보, 통화량 등등) 그대로 남아있는지 테스트 => 정상 확인.
+
+
 
 pragma solidity ^0.5.2;
 
@@ -490,7 +507,7 @@ contract ProxyNemodax is NemodaxStorage  {
     address private implementation;
     event Upgraded(address indexed newContract);
 
-    function upgrade(address _addr) external {
+    function upgrade(address _addr) onlyOwner external {
         require(implementation != _addr);
         implementation = _addr;
         emit Upgraded(implementation);
