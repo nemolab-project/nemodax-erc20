@@ -1,3 +1,36 @@
+// contract version 0.2.8
+// 변경사항
+// 1. 기존 구조에서 변수를 추가하는 수정을 했을경우 사용하던 데이터들의 순서가 꼬여버리는 버그 수정
+//    ProxyNemodax 컨트랙트가 가진 실 데이터 저장 순서중에 가장 마지막에 위치했었던 implementation 변수를 Pausable 컨트랙트의 pause 변수 다음으로 순서 변경
+//    이렇게 하면 변수를 추가하는 수정시 tokenPerEth 변수를 제외한 가장 마지막에 추가할 경우 ERC20 변수들의 사용 데이터를 훼손하지 않음
+//    * 주의할점 : 향후 TokenERC20 컨트랙트의 변수 추가후 주소변경시(tokenPerEth보다 추가된 변수의 순서가 앞서기 때문에 tokenPerEth의 메모리 번지가 뒤로 밀림)
+//               tokenPerEth 데이터가 훼손되기 때문에 반드시 초기화할것.
+//
+//    즉 ProxyNemodax가 가지게 되는 전체 상속관계와 데이터의 순서는 다음과 같음
+//    ================================================================================
+//    상속관계
+//    Ownerable <- Pausable <- RunningConctractManager <- TokenERC20 <- TokenExchanger
+//
+//    Ownerable <- Pausable <- RunningContracttManager <- NemodaxStorage <- ProxyNemodax
+//    ================================================================================
+//    ProxyNemodax가 가진 실제 저장 변수들의 메모리 번지 순서
+//    address payable internal owner;
+//    bool internal paused;
+//    address internal implementation;
+//
+//    string public name;
+//    string public symbol;
+//    uint8 public decimals = 18;
+//    uint256 public totalSupply;
+//
+//    mapping (address => uint256) public balances;
+//    mapping (address => mapping (address => uint256))
+//    mapping (address => bool) public frozenAccount;
+//
+//    uint256 public tokenPerEth;
+//    =================================================================================
+
+
 // contract version 0.2.7
 // upgrade시 0 address 체크로직 추가
 // initExchanger 함수 tokenPerEth 파라미터 데이터타입 uint => uint256으로 명시
@@ -145,13 +178,30 @@ contract Pausable is Ownable {
     }
 }
 
+contract RunningConctractManager is Pausable{
+    address internal implementation;
+
+    event Upgraded(address indexed newContract);
+
+    function upgrade(address _newAddr) onlyOwner external {
+        require(implementation != _newAddr);
+        implementation = _newAddr;
+        //emit Upgraded(implementation);
+    }
+    //when it will be released, will be deleted.
+    function runningAddress() onlyOwner external view returns (address){
+        return implementation;
+    }
+}
+
+
 
 /**
  * NemoLab ERC20 Token
  * Written by Shin HyunJae
  * version 12
  */
-contract TokenERC20 is Pausable {
+contract TokenERC20 is RunningConctractManager {
     using SafeMath for uint256;
 
     // Public variables of the token
@@ -164,6 +214,14 @@ contract TokenERC20 is Pausable {
     mapping (address => uint256) public balances;
     mapping (address => mapping (address => uint256)) public allowed;
     mapping (address => bool) public frozenAccount;
+
+    /**
+     * This is area for some variables to add.
+     * Please add variables from the end of pre-declared variables
+     * if you would have added some variables and re-deployed the contract,
+     * tokenPerEth would get garbage value. so please reset tokenPerEth variable
+     */
+    //uint256 something..;
 
     // This generates a public event on the blockchain that will notify clients
     event Transfer(address indexed from, address indexed to, uint256 value);
@@ -456,8 +514,6 @@ contract TokenExchanger is TokenERC20{
 
     }
 
-
-
     /**
      * Destroy this contract
      *
@@ -484,11 +540,15 @@ contract TokenExchanger is TokenERC20{
 
 }
 
-contract NemodaxStorage is Ownable{
 
-    //Never ever change the order of variables below!!!!
-    bool internal paused;
+/**
+ * NemodaxStorage Contract shouldn't be changed as possible.
+ * If it should be edited, please add from the end of the contract .
+ */
 
+contract NemodaxStorage is RunningConctractManager{
+
+    // Never ever change the order of variables below!!!!
     // Public variables of the token
     string public name;
     string public symbol;
@@ -502,25 +562,13 @@ contract NemodaxStorage is Ownable{
 
     uint256 public tokenPerEth;
 
+
     constructor() Ownable() internal {}
 
 }
 
 
 contract ProxyNemodax is NemodaxStorage  {
-
-    address private implementation;
-    event Upgraded(address indexed newContract);
-
-    function upgrade(address _newAddr) onlyOwner external {
-        require(implementation != 0 && implementation != _newAddr);
-        implementation = _newAddr;
-        emit Upgraded(implementation);
-    }
-    //when it will be released, will be deleted.
-    function runningAddress() onlyOwner external view returns (address){
-        return implementation;
-    }
 
     function () payable external {
         address localImpl = implementation;
