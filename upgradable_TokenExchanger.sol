@@ -1,6 +1,7 @@
 // contract version 0.2.8
-// 변경사항
-// 1. 기존 구조에서 변수를 추가하는 수정을 했을경우 사용하던 데이터들의 순서가 꼬여버리는 버그 수정
+// v0.2.8 버전 변경사항
+// 1. compiler version update 0.5.2 => 0.5.4
+// 2. 기존 구조에서 변수를 추가하는 수정을 했을경우 사용하던 데이터들의 순서가 꼬여버리는 버그 수정
 //    ProxyNemodax 컨트랙트가 가진 실 데이터 저장 순서중에 가장 마지막에 위치했었던 implementation 변수를 Pausable 컨트랙트의 pause 변수 다음으로 순서 변경
 //    이렇게 하면 변수를 추가하는 수정시 tokenPerEth 변수를 제외한 가장 마지막에 추가할 경우 ERC20 변수들의 사용 데이터를 훼손하지 않음
 //    * 주의할점 : 향후 TokenERC20 컨트랙트의 변수 추가후 주소변경시(tokenPerEth보다 추가된 변수의 순서가 앞서기 때문에 tokenPerEth의 메모리 번지가 뒤로 밀림)
@@ -29,6 +30,9 @@
 //
 //    uint256 public tokenPerEth;
 //    =================================================================================
+// v0.2.8 버전 테스트 내용
+// transferOwnership 테스트 성공
+// burn 테스트 확인 totalSupply 감소 확인
 
 
 // contract version 0.2.7
@@ -41,13 +45,13 @@
 // upgrade 함수 onlyOwner로 변경하여 마스터 계정만 컨트랙트 수정이 가능토록 변경함.
 // v0.2.6 버전 추가 테스트 내용
 // 1. 일반계정은 재 init 정상 실패 확인, 단 마스터 계정은 재 init이 가능하기 때문에 꼭! 다시 init하지 않도록 각별히 주의할것
-// 2. 마스터가 아닌 일반계정으로 컨트랙트 변경(업그레이드) 시도시 정상 실패 확인
-// 3. 일반계정 transferFrom 성공확인(approve, allowance 정상 동작 확인 포함)
+// 2. 마스터가 아닌 일반계정으로 컨트랙트 변경(업그레이드) 시도시 정상 실패 확인 (upgrade)
+// 3. 일반계정 transferFrom 성공확인(approve, allowance 정상 동작 확인 포함) (transferFrom, approve, allowance)
 // 4. Exchanger 컨트랙트 수정은 가능하나 새로운 변수를 추가하는 것은 불가함.
 //    실제 저장은 ProxyNemodax에 되며 상속하고 있는 NemodaxStorage에 등록되어 있는 변수만 사용 가능하기 때문에
 //    NemodaxStorage 를 수정후 ProxyNemodax를 재배포하지 않는한
 //    Exchanger 또는 ERC20 컨트랙트에 변수를 추가한다 하여도 사용이 불가함.
-// 5. 마스터계정에 의한 freeze시 송금 불가 확인 / unfreeze시 송금 가능 확인
+// 5. 마스터계정에 의한 freeze시 송금 불가 확인 / unfreeze시 송금 가능 확인 (freeze, unfreeze)
 // 6. pause/unpause 기능 정상작동 확인 (transfer, transferFrom, approve, exchangeEtherToToken 등등 사용불가 확인.)
 // 7. 솔리디티는 소수표시가 안되는데 tokenPerEth로는 이더보다 코인의 가치가 커졌을때 어떻게 표현할까?
 
@@ -56,20 +60,20 @@
 // 1. 마스터 계정 init 성공 (일반계정은 재 init 실패, 단 마스터 계정은 재 init이 가능하기 때문에 꼭! 다시 init하지 않도록 각별히 주의할것)
 // 2. 이더 잔액 확인 성공
 // 3. 코인 잔액 확인 성공
-// 4. 마스터 => 일반 계정 송금 성공
+// 4. 마스터 => 일반 계정 송금 성공 (transfer)
 // 5. 일반 계정 => 일반 계정 송금 성공
 // 6. 사용자 / 마스터 계정 언락 성공
 // 7. 환율 마스터 계정만 환율 확인 안됨 성공
 // 8. 환율 마스터 계정만 변경 성공
-// 9. 이더 -> 코인 교환 성공
-// 10. 코인 -> 이더 교환 성공
-// 11. 코인 출금 마스터만 성공
-// 12. 이더 출금 마스터만 성공
+// 9. 이더 -> 코인 교환 성공 (exchangeEtherToToken)
+// 10. 코인 -> 이더 교환 성공 (exchangeTokenToEther)
+// 11. 코인 출금 마스터만 성공 (withdrawToken)
+// 12. 이더 출금 마스터만 성공 (withdrawEther)
 // 13. Exchanger 컨트랙트 교체 /수정시 사용하던 코인정보가(계좌 잔액들, 코인 메타 정보, 통화량 등등) 그대로 남아있는지 테스트 => 정상 확인.
 
 
 
-pragma solidity ^0.5.2;
+pragma solidity ^0.5.4;
 
 
 /**
@@ -138,7 +142,6 @@ contract Ownable {
     function transferOwnership(address payable newOwner) onlyOwner public {
         owner = newOwner;
     }
-
 }
 
 contract Pausable is Ownable {
@@ -186,7 +189,7 @@ contract RunningConctractManager is Pausable{
     function upgrade(address _newAddr) onlyOwner external {
         require(implementation != _newAddr);
         implementation = _newAddr;
-        //emit Upgraded(implementation);
+        emit Upgraded(implementation);
     }
     //when it will be released, will be deleted.
     function runningAddress() onlyOwner external view returns (address){
@@ -220,8 +223,10 @@ contract TokenERC20 is RunningConctractManager {
      * Please add variables from the end of pre-declared variables
      * if you would have added some variables and re-deployed the contract,
      * tokenPerEth would get garbage value. so please reset tokenPerEth variable
+     *
+     * uint256 something..;
      */
-    //uint256 something..;
+
 
     // This generates a public event on the blockchain that will notify clients
     event Transfer(address indexed from, address indexed to, uint256 value);
@@ -427,6 +432,11 @@ contract TokenERC20 is RunningConctractManager {
 }
 
 
+/**
+ * @title TokenExchanger
+ * @notice This is for exchange between Ether and 'Nemo' token
+ *          It won't be needed after being listed on the exchange.
+ */
 
 contract TokenExchanger is TokenERC20{
   using SafeMath for uint256;
@@ -454,7 +464,6 @@ contract TokenExchanger is TokenERC20{
         tokenPerEth = _tokenPerEth;
     }
 
-
     function setExchangeRate(uint256 _tokenPerEth) onlyOwner external returns (bool success){
         require( _tokenPerEth > 0);
         tokenPerEth = _tokenPerEth;
@@ -466,7 +475,11 @@ contract TokenExchanger is TokenERC20{
         return tokenPerEth;
     }
 
-    //1. 이더받고 토큰으로 전송
+    /**
+     * Exchange Ether To Token
+     *
+     * @notice Send `Nemo` tokens to msg sender as much as amount of ether received considering exchangeRate.
+     */
     function exchangeEtherToToken() payable external noReentrancy returns (bool success){
         uint256 tokenPayment;
         uint256 ethAmount = msg.value;
@@ -483,7 +496,13 @@ contract TokenExchanger is TokenERC20{
         return success;
     }
 
-    //2. 토큰받고 이더로 전송
+    /**
+     * Exchange Token To Ether
+     *
+     * @notice Send Ether to msg sender as much as amount of 'Nemo' Token received considering exchangeRate.
+     *
+     * @param _value Amount of 'Nemo' token
+     */
     function exchangeTokenToEther(uint256 _value) external noReentrancy returns (bool success){
       require(tokenPerEth != 0);
 
@@ -499,15 +518,29 @@ contract TokenExchanger is TokenERC20{
       return success;
     }
 
-    //3. 토큰 인출
+    /**
+     * Withdraw token from TokenExchanger contract
+     *
+     * @notice Withdraw charged Token to _recipient.
+     *
+     * @param _recipient The address to which the token was issued.
+     * @param _value Amount of token to withdraw.
+     */
     function withdrawToken(address _recipient, uint256 _value) onlyOwner noReentrancy public{
       super._transfer(address(this) ,_recipient, _value);
       emit WithdrawEther(_recipient, _value);
 
     }
-    //4. 토큰 받기
 
-    //5. 이더 송금
+
+    /**
+     * Withdraw Ether from TokenExchanger contract
+     *
+     * @notice Withdraw charged Ether to _recipient.
+     *
+     * @param _recipient The address to which the Ether was issued.
+     * @param _value Amount of Ether to withdraw.
+     */
     function withdrawEther(address payable _recipient, uint256 _value) onlyOwner noReentrancy public {
         require(_recipient.send(_value));
         emit WithdrawEther(_recipient, _value);
@@ -542,8 +575,11 @@ contract TokenExchanger is TokenERC20{
 
 
 /**
- * NemodaxStorage Contract shouldn't be changed as possible.
- * If it should be edited, please add from the end of the contract .
+ * @title NemodaxStorage
+ *
+ * @dev This is contract for proxyNemodax data order list.
+ *      Contract shouldn't be changed as possible.
+ *      If it should be edited, please add from the end of the contract .
  */
 
 contract NemodaxStorage is RunningConctractManager{
@@ -567,6 +603,13 @@ contract NemodaxStorage is RunningConctractManager{
 
 }
 
+/**
+ * @title ProxyNemodax
+ *
+ * @dev The only fallback function will forward transaction to TokenExchanger Contract.
+ *      and the result of calculation would be stored in ProxyNemodax
+ *
+ */
 
 contract ProxyNemodax is NemodaxStorage  {
 
