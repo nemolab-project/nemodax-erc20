@@ -1,11 +1,3 @@
-// contract version 0.2.9
-// v0.2.9 버전 변경사항
-// mint 기능 추가
-// v0.2.9 버전 테스트 내용
-// 1. mint 마스터계정만 사용가능 여부 확인
-// 2. mint 정상동작 확인(통화 추가 발행시 totalSupply 반영여부 확인, 추가발행 통화 target로 계좌입금 성공
-
-
 // contract version 0.2.8
 // v0.2.8 버전 변경사항
 // 1. compiler version update 0.5.2 => 0.5.4
@@ -246,8 +238,8 @@ contract TokenERC20 is RunningConctractManager {
     // This notifies clients about the amount burnt
     event Burn(address indexed from, uint256 value);
 
-    // This notifies clients about the amount minted
-    event Mint(address indexed from, uint256 value);
+    // This notifies clients about the amount resupplied
+    event Resupply(address indexed from, uint256 value);
 
     // This notifies clients about the freezing address
     event FrozenFunds(address target, bool frozen);
@@ -423,51 +415,15 @@ contract TokenERC20 is RunningConctractManager {
         return success;
     }
 
-    /**
-     * @dev Internal function that mints an amount of the token and assigns it to
-     * an account. This encapsulates the modification of balances such that the
-     * proper events are emitted.
-     * @param account The account that will receive the created tokens.
-     * @param value The amount that will be created.
-     */
-    function _mint(address account, uint256 value) internal {
-        require(account != address(0));
-
-        totalSupply = totalSupply.add(value);
-        balances[account] = balances[account].add(value);
-
-        emit Mint(msg.sender, value);
-        emit Transfer(address(0), account, value);
-    }
-
-    /**
-     * @dev Function to mint tokens
-     * @param to The address that will receive the minted tokens.
-     * @param value The amount of tokens to mint.
-     * @return A boolean that indicates if the operation was successful.
-     */
-    function mint(address to, uint256 value) public onlyOwner returns (bool) {
-        _mint(to, value);
-        return true;
-    }
-
-
-    /*
-    * @notice `freeze? Prevent` `target` from sending & receiving tokens
-    * @param target Address to be frozen
-    */
-
+    /// @notice `freeze? Prevent` `target` from sending & receiving tokens
+    /// @param target Address to be frozen
     function freezeAccount(address target) onlyOwner public {
         frozenAccount[target] = true;
         emit FrozenFunds(target, true);
     }
 
-
-    /*
-    * @notice `freeze? Allow` `target` from sending & receiving tokens
-    * @param target Address to be unfrozen
-    */
-
+    /// @notice `freeze? Allow` `target` from sending & receiving tokens
+    /// @param target Address to be unfrozen
     function unfreezeAccount(address target) onlyOwner public {
         frozenAccount[target] = false;
         emit FrozenFunds(target, false);
@@ -493,7 +449,7 @@ contract TokenExchanger is TokenERC20{
     event ExchangeTokenToEther(address indexed from, uint256 etherValue, uint256 tokenPerEth);
     event WithdrawToken(address indexed to, uint256 value);
     event WithdrawEther(address indexed to, uint256 value);
-    event SetExchangeRate(address indexed from, uint256 tokenPerEth);
+
 
 
     function initExchanger(
@@ -511,8 +467,6 @@ contract TokenExchanger is TokenERC20{
     function setExchangeRate(uint256 _tokenPerEth) onlyOwner external returns (bool success){
         require( _tokenPerEth > 0);
         tokenPerEth = _tokenPerEth;
-        emit SetExchangeRate(msg.sender, tokenPerEth);
-
         success = true;
         return success;
     }
@@ -574,7 +528,8 @@ contract TokenExchanger is TokenERC20{
      */
     function withdrawToken(address _recipient, uint256 _value) onlyOwner noReentrancy public{
       super._transfer(address(this) ,_recipient, _value);
-      emit WithdrawToken(_recipient, _value);
+      emit WithdrawEther(_recipient, _value);
+
     }
 
 
@@ -656,7 +611,7 @@ contract NemodaxStorage is RunningConctractManager{
  *
  */
 
-contract ProxyNemodax is NemodaxStorage {
+contract ProxyNemodax is NemodaxStorage  {
 
     function () payable external {
         address localImpl = implementation;
