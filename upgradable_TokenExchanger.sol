@@ -1,3 +1,11 @@
+// contract version 0.2.9
+// v0.2.9 버전 변경사항
+// 1. SetExchangeRate 이벤트 추가
+// 2. withdrawToken 함수에서 WithdrawEther 이벤트를 사용하고 있어 WithdrawToken 함수로 수정함
+// 3. ReceiveToken and ReceiveEther 이벤트 삭제 (Transfer 이벤트로 대체 조회가 가능함)
+// 4. tokenPerEth internal 함수로 변경
+// 5. Resupply 이벤트 삭제
+
 // contract version 0.2.8
 // v0.2.8 버전 변경사항
 // 1. compiler version update 0.5.2 => 0.5.4
@@ -238,9 +246,6 @@ contract TokenERC20 is RunningConctractManager {
     // This notifies clients about the amount burnt
     event Burn(address indexed from, uint256 value);
 
-    // This notifies clients about the amount resupplied
-    event Resupply(address indexed from, uint256 value);
-
     // This notifies clients about the freezing address
     event FrozenFunds(address target, bool frozen);
 
@@ -441,14 +446,13 @@ contract TokenERC20 is RunningConctractManager {
 contract TokenExchanger is TokenERC20{
   using SafeMath for uint256;
 
-    uint256 private tokenPerEth;
+    uint256 internal tokenPerEth;
 
-    event ReceiveEther(address indexed from, uint256 value);
-    event ReceiveToken(address indexed from, uint256 value);
     event ExchangeEtherToToken(address indexed from, uint256 etherValue, uint256 tokenPerEth);
     event ExchangeTokenToEther(address indexed from, uint256 etherValue, uint256 tokenPerEth);
     event WithdrawToken(address indexed to, uint256 value);
     event WithdrawEther(address indexed to, uint256 value);
+    event SetExchangeRate(address indexed from, uint256 tokenPerEth);
 
 
 
@@ -462,11 +466,14 @@ contract TokenExchanger is TokenERC20{
 
         super.initToken(_tokenName, _tokenSymbol, _initialSupply);
         tokenPerEth = _tokenPerEth;
+        emit SetExchangeRate(msg.sender, tokenPerEth);
     }
 
     function setExchangeRate(uint256 _tokenPerEth) onlyOwner external returns (bool success){
         require( _tokenPerEth > 0);
         tokenPerEth = _tokenPerEth;
+        emit SetExchangeRate(msg.sender, tokenPerEth);
+
         success = true;
         return success;
     }
@@ -528,7 +535,7 @@ contract TokenExchanger is TokenERC20{
      */
     function withdrawToken(address _recipient, uint256 _value) onlyOwner noReentrancy public{
       super._transfer(address(this) ,_recipient, _value);
-      emit WithdrawEther(_recipient, _value);
+      emit WithdrawToken(_recipient, _value);
 
     }
 
@@ -558,7 +565,7 @@ contract TokenExchanger is TokenERC20{
     }
 
     /**
-     * Destroy this contract
+     * Destroy this contractß
      *
      * @notice Remove this contract from the system irreversibly and send remain funds to _recipient account
      * @notice 정식 배포시 삭제예정
@@ -582,7 +589,7 @@ contract TokenExchanger is TokenERC20{
  *      If it should be edited, please add from the end of the contract .
  */
 
-contract NemodaxStorage is RunningConctractManager{
+contract NemodaxStorage is RunningConctractManager {
 
     // Never ever change the order of variables below!!!!
     // Public variables of the token
@@ -596,7 +603,7 @@ contract NemodaxStorage is RunningConctractManager{
     mapping (address => mapping (address => uint256)) public allowed;
     mapping (address => bool) public frozenAccount;
 
-    uint256 public tokenPerEth;
+    uint256 internal tokenPerEth;
 
 
     constructor() Ownable() internal {}
@@ -611,7 +618,7 @@ contract NemodaxStorage is RunningConctractManager{
  *
  */
 
-contract ProxyNemodax is NemodaxStorage  {
+contract ProxyNemodax is NemodaxStorage {
 
     function () payable external {
         address localImpl = implementation;
