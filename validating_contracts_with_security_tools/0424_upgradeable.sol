@@ -1,7 +1,11 @@
+pragma solidity 0.4.24;
 
-
-pragma solidity ^0.4.24;
-
+// [v0.2.10] validating contract
+// 1. solidity compiler 버전 0.4.24로 다운그레이드 <- 검증툴 지원 컴파일러 버전을 맞추기 위함
+// 2. pragma '^' 삭제 (smart check 권고사항)
+// 3. 발행 코인 수 체크구문 추가 (mythril 권고사항 0<_initialSupply <= 2^184)
+// 4. Token -> Ether 교환시 교환비로 나누어 떨어지지 않는 Token을 입금할 경우 나머지는 빼고 토큰 입금 받는 것으로 로직 수정
+// (ex. tokenPerEth=3 일 경우 10개의 Token을 교환해달라는 요청을 받으면 3 wei로 교환이 가능하지만 1 Token은 wei로 교환이 불가능하므로 10 토큰 청을 받아도 9개 토큰만 3wei로 교환해준다.)
 
 /**
  * @title SafeMath
@@ -52,6 +56,7 @@ library SafeMath {
     return c;
   }
 }
+
 
 
 contract Ownable {
@@ -274,9 +279,7 @@ contract TokenERC20 is RunningConctractManager {
      */
     function transferFrom(address _from, address _to, uint256 _value) public noReentrancy returns (bool success) {
         require(_value <= allowed[_from][msg.sender]);     // Check allowance
-        uint256 before = allowed[_from][msg.sender]; // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101, SWC ID:110
         allowed[_from][msg.sender] = allowed[_from][msg.sender].sub(_value);
-        assert(allowed[_from][msg.sender].add(_value) == before); // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101, SWC ID:110
         _transfer(_from, _to, _value);
         success = true;
         return success;
@@ -439,9 +442,11 @@ contract TokenExchanger is TokenERC20{
 
       uint256 remainingEthBalance = address(this).balance;
       uint256 etherPayment = _value.div(tokenPerEth);
+      uint256 remainder = _value % tokenPerEth; // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
       require(remainingEthBalance >= etherPayment);
 
-      super._transfer(msg.sender, address(this), _value);
+      uint256 tokenAmount = _value.sub(remainder); // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
+      super._transfer(msg.sender, address(this), tokenAmount); // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
       require(address(msg.sender).send(etherPayment));
 
       emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
