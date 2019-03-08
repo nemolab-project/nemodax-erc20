@@ -1,3 +1,15 @@
+// contract version 0.2.10
+// v0.2.10 버전 변경사항 (security tool 권고안 수정 : securify, smart check, mythril, oyente)
+// 1. Proxy 구조로 현상태 진행 결정
+// 2. pragma ^ syntax 삭제
+// 3. initialSuuply * 10^18 값이 uint256 overflow 되지 않도록 검사 로직 추가
+// 4. initToken시에 _initialSupply 값이 0보다 크도록 체크
+// 5. getExchangerRate return 변수 uint => uint256으로 명시
+// 6. Token -> Ether 교환시 교환비로 나누어 떨어지지 않는 Token을 입금할 경우 나머지는 빼고 토큰 입금 받는 것으로 로직 수정
+// (ex. tokenPerEth=3 일 경우 10개의 Token을 교환해달라는 요청을 받으면 3 wei로 교환이 가능하지만 1 Token은 wei로 교환이 불가능하므로 10 토큰 청을 받아도 9개 토큰만 3wei로 교환해준다.)
+// 7. TokenExchanger destroy 관련 함수 제거
+// 8. proxy함수 localImpl 주소 체크문에서 hex값으로 형식명시(0x0)
+
 // contract version 0.2.9
 // v0.2.9 버전 변경사항
 // 1. SetExchangeRate 이벤트 추가
@@ -81,7 +93,7 @@
 
 
 
-pragma solidity ^0.5.4;
+pragma solidity 0.5.4;
 
 
 /**
@@ -133,6 +145,8 @@ library SafeMath {
     return c;
   }
 }
+
+
 
 contract Ownable {
     address payable internal owner;
@@ -262,9 +276,11 @@ contract TokenERC20 is RunningConctractManager {
     ) internal onlyOwner {
         name = _tokenName;                                       // Set the name for display purposes
         symbol = _tokenSymbol;                                   // Set the symbol for display purposes
-        totalSupply = convertToDecimalUnits(_initialSupply);     // Update total supply with the decimal amount
-        balances[msg.sender] = totalSupply;                     // Give the creator all initial tokens
 
+        require(_initialSupply > 0 && _initialSupply <= 2**uint256(184)); // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101 => _initialSupply <= 2^184 <= (2^256 / 10^18)
+        totalSupply = convertToDecimalUnits(_initialSupply);     // Update total supply with the decimal amount
+
+        balances[msg.sender] = totalSupply;                     // Give the creator all initial tokens
         emit Transfer(address(this), msg.sender, totalSupply);
         emit LastBalance(address(this), 0);
         emit LastBalance(msg.sender, totalSupply);
@@ -462,7 +478,7 @@ contract TokenExchanger is TokenERC20{
         uint256 _initialSupply,
         uint256 _tokenPerEth
     ) external onlyOwner {
-        require(_tokenPerEth > 0);
+        require(_tokenPerEth > 0 && _initialSupply > 0);  // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101
 
         super.initToken(_tokenName, _tokenSymbol, _initialSupply);
         tokenPerEth = _tokenPerEth;
@@ -478,7 +494,7 @@ contract TokenExchanger is TokenERC20{
         return success;
     }
 
-    function getExchangerRate() onlyOwner external view returns(uint){
+    function getExchangerRate() onlyOwner external view returns(uint256){
         return tokenPerEth;
     }
 
@@ -515,9 +531,11 @@ contract TokenExchanger is TokenERC20{
 
       uint256 remainingEthBalance = address(this).balance;
       uint256 etherPayment = _value.div(tokenPerEth);
+      uint256 remainder = _value % tokenPerEth; // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
       require(remainingEthBalance >= etherPayment);
 
-      super._transfer(msg.sender, address(this), _value);
+      uint256 tokenAmount = _value.sub(remainder); // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
+      super._transfer(msg.sender, address(this), tokenAmount); // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
       require(address(msg.sender).send(etherPayment));
 
       emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
@@ -553,31 +571,6 @@ contract TokenExchanger is TokenERC20{
         emit WithdrawEther(_recipient, _value);
 
     }
-
-    /**
-     * Destroy this contract
-     *
-     * @notice Remove this contract from the system irreversibly and send remain funds to owner account
-     * @notice 정식 배포시 삭제예정
-     */
-    function destroy() external onlyOwner {
-        destroyAndSend(owner);
-    }
-
-    /**
-     * Destroy this contractß
-     *
-     * @notice Remove this contract from the system irreversibly and send remain funds to _recipient account
-     * @notice 정식 배포시 삭제예정
-     *
-     * @param _recipient Address to receive the funds
-     */
-    function destroyAndSend(address payable _recipient) public onlyOwner {
-        uint256 tokenBalance = super.balanceOf(address(this));
-        require(tokenBalance == 0); // Check if this contract have remaining tokens
-        selfdestruct(_recipient);
-    }
-
 }
 
 
@@ -622,7 +615,7 @@ contract ProxyNemodax is NemodaxStorage {
 
     function () payable external {
         address localImpl = implementation;
-        require(localImpl != address(0));
+        require(localImpl != address(0x0));
 
         assembly {
             let ptr := mload(0x40)
