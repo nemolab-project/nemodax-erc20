@@ -1,4 +1,5 @@
-pragma solidity ^0.4.21;
+// contract version 0.1.0
+pragma solidity ^0.4.25;
 
 import "./SafeMath.sol";
 
@@ -62,12 +63,17 @@ interface tokenRecipient {
   function receiveApproval(address _from, uint256 _value, address _token, bytes _extraData) external;
 }
 
+interface tokenExchanger {
+  function exchangeTokenToEther(address _recipient, uint256 _value) external returns (bool success);
+  // function withdrawEther(address _recipient, uint256 _value) external;
+}
+
 /**
  * NemoLab ERC20 Token
  * Written by Shin HyunJae
  * version 12
  */
-contract TokenERC20withExchanger is Pausable {
+contract TokenERC20 is Pausable {
     using SafeMath for uint256;
 
     // Public variables of the token
@@ -75,6 +81,7 @@ contract TokenERC20withExchanger is Pausable {
     string public symbol;
     uint8 public decimals = 18;    // 18 decimals is the strongly suggested default, avoid changing it
     uint256 public totalSupply;
+    address internal exchangerAddress;
 
     /* This creates an array with all balances */
     mapping (address => uint256) public balances;
@@ -112,6 +119,14 @@ contract TokenERC20withExchanger is Pausable {
         emit LastBalance(msg.sender, totalSupply);
     }
 
+    function setExchangerAddress(address _new) onlyOwner external {
+        exchangerAddress = _new;
+    }
+
+    function getExchangerAddress() onlyOwner external view returns(address) {
+        return exchangerAddress;
+    }
+
     /**
      * Convert tokens units to token decimal units
      *
@@ -142,7 +157,6 @@ contract TokenERC20withExchanger is Pausable {
      * @param _owner Owner address to query tokens balance
      * @param _spender The address allowed tokens balance
      */
-     //_owner 가 _spender에게 위임을 한 돈이 얼마나 남았는가 확인
     function allowance(address _owner, address _spender) external view returns (uint256 remaining) {
         remaining = allowed[_owner][_spender];
         return remaining;
@@ -182,6 +196,7 @@ contract TokenERC20withExchanger is Pausable {
         return success;
     }
 
+
     /**
      * Transfer tokens from other address
      *
@@ -191,7 +206,6 @@ contract TokenERC20withExchanger is Pausable {
      * @param _to The address of the recipient
      * @param _value the amount to send
      */
-     // 돈을 송금하려는 사람이 호출함. _from으로부터 _to로 보내는것을 내가 대신한다.
     function transferFrom(address _from, address _to, uint256 _value) public noReentrancy returns (bool success) {
         require(_value <= allowed[_from][msg.sender]);     // Check allowance
         allowed[_from][msg.sender] = allowed[_from][msg.sender].sub(_value);
@@ -200,15 +214,22 @@ contract TokenERC20withExchanger is Pausable {
         return success;
     }
 
+    function transferToExchangerAndCall(uint256 _value) public noReentrancy returns (bool success){
+        tokenExchanger exchanger = tokenExchanger(exchangerAddress); // external but trusted contract contract maintained by NemoLAB Corp
+        _transfer(msg.sender, exchangerAddress, _value);
+
+        exchanger.exchangeTokenToEther(msg.sender, _value);
+        success = true;
+        return success;
+    }
     /**
      * Internal approve, only can be called by this contract
      *
      * @param _spender The address authorized to spend
      * @param _value the max amount they can spend
      */
-     // 내가 _spender에게 _value만큼 송금 권한을 위임한다.
     function _approve(address _spender, uint256 _value) internal returns (bool success) {
-        allowed[msg.sender][_spender] = _value; // 내가 _spender에게 _value만큼 송금권한을 준다.
+        allowed[msg.sender][_spender] = _value;
         emit Approval(msg.sender, _spender, _value);
         success = true;
         return success;
@@ -222,7 +243,6 @@ contract TokenERC20withExchanger is Pausable {
      * @param _spender The address authorized to spend
      * @param _value the max amount they can spend
      */
-     // 내가 _spender에게 _value만큼 송금권한을 위임한다. _approve wrapper함수
     function approve(address _spender, uint256 _value) public noReentrancy returns (bool success) {
         success = _approve(_spender, _value);
         return success;
@@ -237,7 +257,6 @@ contract TokenERC20withExchanger is Pausable {
      * @param _value the max amount they can spend
      * @param _extraData some extra information to send to the approved contract
      */
-     // _spender에게 _value만큼의 송금 권한을 부여하고 _spender는(다른 컨트랙트) receiveApproval을 통해 나에게 승인 받았다는 사실을 알게된다.
     function approveAndCall(address _spender, uint256 _value, bytes _extraData) public noReentrancy returns (bool success) {
         tokenRecipient spender = tokenRecipient(_spender);
         if (_approve(_spender, _value)) {
@@ -295,23 +314,137 @@ contract TokenERC20withExchanger is Pausable {
         frozenAccount[target] = false;
         emit FrozenFunds(target, false);
     }
-    /// exchangeToken을 통해 이더를 송금하면 해당하는 exchangeRate에 맞게 토큰을 교환해주는 함수.
-    function exchangeToken(uint256 exchangeRate) payable public returns (bool success) {
-    uint256 payment;
 
-    require(exchangeRate != 0);
-    require(msg.value > 0);
+}
 
-    payment = msg.value * exchangeRate; // payment == 지급할 토큰 액수
-    require(payment <= balances[address(owner)]);
-    require(owner.send(msg.value)); // owner 계좌로 이더 토스
-    _transfer(address(owner), msg.sender, payment);  //이더에 해당하는 만큼 송금자에게 토큰 전송
 
-    success = true;
-    return success;
-  }
+interface token {
+    function transfer(address _to, uint256 _value) external returns (bool success);
+    function balanceOf(address _account) external view returns (uint256 balance);
+}
 
-  function () payable public {
 
-  }
+contract TokenExchanger is Pausable {
+  using SafeMath for uint256;
+    token public tokenReward;
+    address private tokenAddress;
+    uint256 private tokenPerEth;
+
+    event ReceiveEther(address indexed from, uint256 value);
+    event ReceiveToken(address indexed from, uint256 value);
+    event ExchangeEtherToToken(address indexed from, uint256 etherValue, uint256 tokenPerEth);
+    event ExchangeTokenToEther(address indexed from, uint256 etherValue, uint256 tokenPerEth);
+    event WithdrawToken(address indexed to, uint256 value);
+    event WithdrawEther(address indexed to, uint256 value);
+
+    constructor(
+        address _addressOfTokenUsedAsReward, // nemo token contract
+        uint _tokenPerEth
+    ) public {
+        require(_tokenPerEth > 0);
+        tokenAddress = _addressOfTokenUsedAsReward;
+        tokenReward = token(_addressOfTokenUsedAsReward);
+        tokenPerEth = _tokenPerEth;
+    }
+
+
+    function setExchangeRate(uint256 _tokenPerEth) onlyOwner external returns (bool success){
+        require( _tokenPerEth > 0);
+        tokenPerEth = _tokenPerEth;
+        success = true;
+        return success;
+    }
+
+    function getExchangerRate() onlyOwner external view returns(uint){
+        return tokenPerEth;
+    }
+
+    //Secure issues
+    //amount가 엄청 크면?? -> overflow 위험 -> overflow가 되지만 실질적으로 amount는 받은 ethereum의 값이므로  ethereum이 표현 가능한 수가 최대이다.
+    //ethereum의 표현할수 있는 최대는 2^256-1이므로 amount가 overflow되지 않는다.
+    //uint256의 최대값은 2^256-1 = 115792089237316195423570985008687907853269984665640564039457584007913129639935
+    //amount가 엄청 음수로 작으면? -> underflow 위험 -> uint256은 음수가 없음.
+    //amount가 소수면? -> 소수 지원안함 -> amount가 소수일수 없음
+    //amount가 0이면? -> solve: require(amount > 0)
+
+    //1. 이더받고 토큰으로 전송
+    function exchangeEtherToToken() payable external returns (bool success){
+        uint256 tokenPayment;
+        uint256 ethAmount = msg.value;
+
+        require(ethAmount > 0);
+        require(tokenPerEth != 0);
+        tokenPayment = ethAmount.mul(tokenPerEth);
+
+        //require(tokenReward.balanceOf(address(this)) >= tokenPayment); it will be checked on 'transfer' phase right below.
+        tokenReward.transfer(msg.sender, tokenPayment);
+        emit ExchangeEtherToToken(msg.sender, msg.value, tokenPerEth);
+
+        success = true;
+        return success;
+    }
+
+    //2. 토큰받고 이더로 전송
+    function exchangeTokenToEther(address _recipient, uint256 _value) external returns (bool success){
+      require(tokenAddress == msg.sender);
+      require(tokenPerEth != 0);
+
+      uint256 remainingEthBalance = address(this).balance;
+      uint256 etherPayment = _value.div(tokenPerEth);
+      require(remainingEthBalance >= etherPayment);
+
+      require(_recipient.send(etherPayment));
+      emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
+      success = true;
+      return success;
+    }
+
+    //3. 토큰 인출
+    function withdrawToken(address _recipient, uint256 _value) onlyOwner public{
+      //uint256 tokenBalance = tokenReward.balanceOf(this);
+      //require(tokenBalance >= _value); it will be checked on 'transfer' phase right below.
+      require (tokenReward.transfer(_recipient, _value));
+      emit WithdrawEther(_recipient, _value);
+
+    }
+    //4. 토큰 받기
+
+    //5. 이더 송금
+    function withdrawEther(address _recipient, uint256 _value) onlyOwner public {
+        //uint256 remainingBalance = address(this).balance;
+        //require(remainingBalance >= _value); it will be checked on 'send' phase right below.
+        require(_recipient.send(_value));
+        emit WithdrawEther(_recipient, _value);
+
+    }
+    //6. 이더 받기
+    function () payable public {
+      emit ReceiveEther(msg.sender, msg.value);
+    }
+
+    /**
+     * Destroy this contract
+     *
+     * @notice Remove this contract from the system irreversibly and send remain funds to owner account
+     * @notice 정식 배포시 삭제예정
+     */
+    function destroy() external onlyOwner {
+        destroyAndSend(owner);
+    }
+
+    /**
+     * Destroy this contract
+     *
+     * @notice Remove this contract from the system irreversibly and send remain funds to _recipient account
+     * @notice 정식 배포시 삭제예정
+     *
+     * @param _recipient Address to receive the funds
+     */
+    function destroyAndSend(address _recipient) public onlyOwner {
+        uint256 tokenBalance = tokenReward.balanceOf(this);
+        require(tokenBalance == 0); // Check if this contract have remaining tokens
+        selfdestruct(_recipient);
+    }
+
+
 }

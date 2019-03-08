@@ -1,6 +1,63 @@
-pragma solidity ^0.4.21;
+pragma solidity 0.4.24;
 
-import "./SafeMath.sol";
+// [v0.2.10] validating contract
+// 1. solidity compiler 버전 0.4.24로 다운그레이드 <- 검증툴 지원 컴파일러 버전을 맞추기 위함
+// 2. pragma '^' 삭제 (smart check 권고사항)
+// 3. 발행 코인 수 체크구문 추가 (mythril 권고사항 0<_initialSupply <= 2^184)
+// 4. Token -> Ether 교환시 교환비로 나누어 떨어지지 않는 Token을 입금할 경우 나머지는 빼고 토큰 입금 받는 것으로 로직 수정
+// (ex. tokenPerEth=3 일 경우 10개의 Token을 교환해달라는 요청을 받으면 3 wei로 교환이 가능하지만 1 Token은 wei로 교환이 불가능하므로 10 토큰 청을 받아도 9개 토큰만 3wei로 교환해준다.)
+
+/**
+ * @title SafeMath
+ * @dev Math operations with safety checks that throw on error
+ */
+library SafeMath {
+
+  /**
+  * @dev Multiplies two numbers, throws on overflow.
+  */
+  function mul(uint256 a, uint256 b) internal pure returns (uint256 c) {
+    // Gas optimization: this is cheaper than asserting 'a' not being zero, but the
+    // benefit is lost if 'b' is also tested.
+    // See: https://github.com/OpenZeppelin/openzeppelin-solidity/pull/522
+    if (a == 0) {
+      return 0;
+    }
+
+    c = a * b;
+    assert(c / a == b);
+    return c;
+  }
+
+  /**
+  * @dev Integer division of two numbers, truncating the quotient.
+  */
+  function div(uint256 a, uint256 b) internal pure returns (uint256) {
+    // assert(b > 0); // Solidity automatically throws when dividing by 0
+    // uint256 c = a / b;
+    // assert(a == b * c + a % b); // There is no case in which this doesn't hold
+    return a / b;
+  }
+
+  /**
+  * @dev Subtracts two numbers, throws on overflow (i.e. if subtrahend is greater than minuend).
+  */
+  function sub(uint256 a, uint256 b) internal pure returns (uint256) {
+    assert(b <= a);
+    return a - b;
+  }
+
+  /**
+  * @dev Adds two numbers, throws on overflow.
+  */
+  function add(uint256 a, uint256 b) internal pure returns (uint256 c) {
+    c = a + b;
+    assert(c >= a);
+    return c;
+  }
+}
+
+
 
 contract Ownable {
     address internal owner;
@@ -18,7 +75,6 @@ contract Ownable {
     function transferOwnership(address newOwner) onlyOwner public {
         owner = newOwner;
     }
-
 }
 
 contract Pausable is Ownable {
@@ -58,9 +114,7 @@ contract Pausable is Ownable {
     }
 }
 
-interface tokenRecipient {
-  function receiveApproval(address _from, uint256 _value, address _token, bytes _extraData) external;
-}
+
 
 /**
  * NemoLab ERC20 Token
@@ -81,6 +135,16 @@ contract TokenERC20 is Pausable {
     mapping (address => mapping (address => uint256)) public allowed;
     mapping (address => bool) public frozenAccount;
 
+    /**
+     * This is area for some variables to add.
+     * Please add variables from the end of pre-declared variables
+     * if you would have added some variables and re-deployed the contract,
+     * tokenPerEth would get garbage value. so please reset tokenPerEth variable
+     *
+     * uint256 something..;
+     */
+
+
     // This generates a public event on the blockchain that will notify clients
     event Transfer(address indexed from, address indexed to, uint256 value);
     event LastBalance(address indexed account, uint256 value);
@@ -91,9 +155,6 @@ contract TokenERC20 is Pausable {
     // This notifies clients about the amount burnt
     event Burn(address indexed from, uint256 value);
 
-    // This notifies clients about the amount resupplied
-    event Resupply(address indexed from, uint256 value);
-
     // This notifies clients about the freezing address
     event FrozenFunds(address target, bool frozen);
 
@@ -102,15 +163,24 @@ contract TokenERC20 is Pausable {
      *
      * Initializes contract with initial supply tokens to the creator of the contract
      */
-    constructor(string tokenName, string tokenSymbol, uint256 initialSupply) public {
-        name = tokenName;                                       // Set the name for display purposes
-        symbol = tokenSymbol;                                   // Set the symbol for display purposes
-        totalSupply = convertToDecimalUnits(initialSupply);     // Update total supply with the decimal amount
+
+    function initToken(
+        string memory _tokenName,
+        string memory _tokenSymbol,
+        uint256 _initialSupply
+    ) internal onlyOwner {
+        name = _tokenName;                                       // Set the name for display purposes
+        symbol = _tokenSymbol;                                   // Set the symbol for display purposes
+
+        require(_initialSupply > 0 && _initialSupply <= 2**uint256(184)); // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101 => _initialSupply <= 2^184 <= (2^256 / 10^18)
+        totalSupply = convertToDecimalUnits(_initialSupply);     // Update total supply with the decimal amount
+
         balances[msg.sender] = totalSupply;                     // Give the creator all initial tokens
         emit Transfer(address(this), msg.sender, totalSupply);
         emit LastBalance(address(this), 0);
         emit LastBalance(msg.sender, totalSupply);
     }
+
 
     /**
      * Convert tokens units to token decimal units
@@ -129,7 +199,7 @@ contract TokenERC20 is Pausable {
      *
      * @param _account Account address to query tokens balance
      */
-    function balanceOf(address _account) external view returns (uint256 balance) {
+    function balanceOf(address _account) public view returns (uint256 balance) {
         balance = balances[_account];
         return balance;
     }
@@ -151,7 +221,7 @@ contract TokenERC20 is Pausable {
      * Internal transfer, only can be called by this contract
      */
     function _transfer(address _from, address _to, uint256 _value) internal {
-        require(_to != 0x0);                                            // Prevent transfer to 0x0 address. Use burn() instead
+        require(_to != address(0x0));                                            // Prevent transfer to 0x0 address. Use burn() instead
         require(balances[_from] >= _value);                             // Check if the sender has enough
         require(!frozenAccount[_from]);                                 // Check if sender is frozen
         require(!frozenAccount[_to]);                                   // Check if recipient is frozen
@@ -180,6 +250,7 @@ contract TokenERC20 is Pausable {
         success = true;
         return success;
     }
+
 
     /**
      * Transfer tokens from other address
@@ -224,23 +295,6 @@ contract TokenERC20 is Pausable {
         return success;
     }
 
-    /**
-     * Set allowance for other address and notify
-     *
-     * @notice Allows `_spender` to spend no more than `_value` tokens on your behalf, and then ping the contract about it
-     *
-     * @param _spender The address authorized to spend
-     * @param _value the max amount they can spend
-     * @param _extraData some extra information to send to the approved contract
-     */
-    function approveAndCall(address _spender, uint256 _value, bytes _extraData) public noReentrancy returns (bool success) {
-        tokenRecipient spender = tokenRecipient(_spender);
-        if (_approve(_spender, _value)) {
-            spender.receiveApproval(msg.sender, _value, this, _extraData);
-            success = true;
-            return success;
-        }
-    }
 
     /**
      * Destroy tokens
@@ -294,5 +348,163 @@ contract TokenERC20 is Pausable {
 }
 
 
+/**
+ * @title NemoExchanger
+ * @notice This is for exchange between Ether and 'Nemo' token
+ *          It won't be needed after being listed on the exchange.
+ */
+
+contract NemoExchanger is TokenERC20{
+  using SafeMath for uint256;
+
+    uint256 internal tokenPerEth;
+    bool private exchangeOpened = true;
+
+    event ExchangeEtherToToken(address indexed from, uint256 etherValue, uint256 tokenPerEth);
+    event ExchangeTokenToEther(address indexed from, uint256 etherValue, uint256 tokenPerEth);
+    event ReserveEther(address indexed from, uint256 value);
+    event ReserveToken(address indexed from, uint256 alue);
+    event WithdrawToken(address indexed to, uint256 value);
+    event WithdrawEther(address indexed to, uint256 value);
+    event SetExchangeRate(address indexed from, uint256 tokenPerEth);
+
+
+    modifier isOpen() {
+        require(exchangeOpened == true);
+        _;
+    }
+
+    function initExchanger(
+        string _tokenName,
+        string _tokenSymbol,
+        uint256 _initialSupply,
+        uint256 _tokenPerEth
+    ) external onlyOwner {
+        require(_tokenPerEth > 0 && _initialSupply > 0);  // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101
+
+        super.initToken(_tokenName, _tokenSymbol, _initialSupply);
+        tokenPerEth = _tokenPerEth;
+        emit SetExchangeRate(msg.sender, tokenPerEth);
+    }
+
+    /**
+     * set the setExchangeClosed variable flag
+     *
+     * set the setExchangeClosed variable flag true to open this tokens exchanger
+     */
+    function setExchangeOpened() isOpen onlyOwner external {
+        exchangeOpened = false;
+    }
+
+    function getExchangeOpened() isOpen external view returns (bool _exchangeOpened) {
+        _exchangeOpened = exchangeOpened;
+        return _exchangeOpened;
+    }
+
+
+    function setExchangeRate(uint256 _tokenPerEth) isOpen onlyOwner external returns (bool success){
+        require( _tokenPerEth > 0);
+        tokenPerEth = _tokenPerEth;
+        emit SetExchangeRate(msg.sender, tokenPerEth);
+
+        success = true;
+        return success;
+    }
+
+    function getExchangerRate() isOpen onlyOwner external view returns(uint256){
+        return tokenPerEth;
+    }
+
+    /**
+     * Exchange Ether To Token
+     *
+     * @notice Send `Nemo` tokens to msg sender as much as amount of ether received considering exchangeRate.
+     */
+    function exchangeEtherToToken() payable external isOpen noReentrancy returns (bool success){
+        uint256 tokenPayment;
+        uint256 ethAmount = msg.value;
+
+        require(ethAmount > 0);
+        require(tokenPerEth != 0);
+        tokenPayment = ethAmount.mul(tokenPerEth);
+
+        super._transfer(address(this), msg.sender, tokenPayment);
+
+        emit ExchangeEtherToToken(msg.sender, msg.value, tokenPerEth);
+
+        success = true;
+        return success;
+    }
+
+    /**
+     * Exchange Token To Ether
+     *
+     * @notice Send Ether to msg sender as much as amount of 'Nemo' Token received considering exchangeRate.
+     *
+     * @param _value Amount of 'Nemo' token
+     */
+    function exchangeTokenToEther(uint256 _value) external isOpen noReentrancy returns (bool success){
+      require(tokenPerEth != 0);
+
+      uint256 remainingEthBalance = address(this).balance;
+      uint256 etherPayment = _value.div(tokenPerEth);
+      uint256 remainder = _value % tokenPerEth; // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
+      require(remainingEthBalance >= etherPayment);
+
+      uint256 tokenAmount = _value.sub(remainder); // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
+      super._transfer(msg.sender, address(this), tokenAmount); // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
+      require(address(msg.sender).send(etherPayment));
+
+      emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
+      success = true;
+      return success;
+    }
+
+    /**
+     * Reserve Ether
+     *
+     * @notice Send Ether to NemoExchanger for exchange service.
+     */
+    function reserveEther() payable isOpen onlyOwner external {
+      emit ReserveEther(msg.sender, msg.value);
+    }
+
+    /**
+     * Reserve Token
+     *
+     * @notice Send `Nemo` tokens to NemoExchanger for exchange service.
+     */
+    function reserveToken(uint256 _value) isOpen onlyOwner external {
+      super._transfer(msg.sender, address(this), _value);
+      emit ReserveToken(msg.sender, _value);
+    }
+
+    /**
+     * Withdraw token from NemoExchanger contract
+     *
+     * @notice Withdraw charged Token to _recipient.
+     *
+     * @param _recipient The address to which the token was issued.
+     * @param _value Amount of token to withdraw.
+     */
+    function withdrawToken(address _recipient, uint256 _value) onlyOwner noReentrancy public {
+      super._transfer(address(this) ,_recipient, _value);
+      emit WithdrawToken(_recipient, _value);
+    }
+
+
+    /**
+     * Withdraw Ether from NemoExchanger contract
+     *
+     * @notice Withdraw charged Ether to _recipient.
+     *
+     * @param _recipient The address to which the Ether was issued.
+     * @param _value Amount of Ether to withdraw.
+     */
+    function withdrawEther(address _recipient, uint256 _value) onlyOwner noReentrancy public {
+        require(_recipient.send(_value));
+        emit WithdrawEther(_recipient, _value);
+
+    }
 
 }
