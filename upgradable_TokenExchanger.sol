@@ -203,6 +203,9 @@ contract Pausable is Ownable {
     }
 }
 
+/**
+ * Contract Managing TokenExchanger's address used by ProxyNemodazΩ
+ */
 contract RunningConctractManager is Pausable{
     address internal implementation;
 
@@ -213,7 +216,7 @@ contract RunningConctractManager is Pausable{
         implementation = _newAddr;
         emit Upgraded(implementation);
     }
-    //when it will be released, will be deleted.
+
     function runningAddress() onlyOwner external view returns (address){
         return implementation;
     }
@@ -264,7 +267,7 @@ contract TokenERC20 is RunningConctractManager {
     event FrozenFunds(address target, bool frozen);
 
     /**
-     * Constructor function
+     * Initialize Token Function
      *
      * Initializes contract with initial supply tokens to the creator of the contract
      */
@@ -471,7 +474,13 @@ contract TokenExchanger is TokenERC20{
     event SetExchangeRate(address indexed from, uint256 tokenPerEth);
 
 
-
+    /**
+     * Initialize Exchanger Function
+     *
+     * Initialize Exchanger contract with tokenPerEth
+     * and Initialize NemoCoin by calling initToken
+     * It would call initToken in TokenERC20 with _tokenName, _tokenSymbol, _initalSupply
+     */
     function initExchanger(
         string calldata _tokenName,
         string calldata _tokenSymbol,
@@ -485,6 +494,13 @@ contract TokenExchanger is TokenERC20{
         emit SetExchangeRate(msg.sender, tokenPerEth);
     }
 
+
+    /**
+     * Change tokenPerEth variable only by owner
+     *
+     * Because "TokenExchaner" is only used until be listed on the exchange,
+     * tokenPerEth is needed by then and it would be managed by manager.
+     */
     function setExchangeRate(uint256 _tokenPerEth) onlyOwner external returns (bool success){
         require( _tokenPerEth > 0);
         tokenPerEth = _tokenPerEth;
