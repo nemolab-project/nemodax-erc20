@@ -1,12 +1,11 @@
-// commit a1a45774f86addbde21e6b7517fbc30801b9510f
-// callisto recommendation 수정
-// 1. initToken / initExchanger는 오직 한번만 실행 가능토록 initialized 변수 추가
-// 2. ERC20 토큰 burn 기눙 삭제
-// 3. transferOwnership 수행시 널주소 체크 로직 추가
-// 4. multiple ownership 구현중
+pragma solidity 0.4.24;
 
-pragma solidity 0.5.4;
-
+// [v0.2.10] validating contract
+// 1. solidity compiler 버전 0.4.24로 다운그레이드 <- 검증툴 지원 컴파일러 버전을 맞추기 위함
+// 2. pragma '^' 삭제 (smart check 권고사항)
+// 3. 발행 코인 수 체크구문 추가 (mythril 권고사항 0<_initialSupply <= 2^184)
+// 4. Token -> Ether 교환시 교환비로 나누어 떨어지지 않는 Token을 입금할 경우 나머지는 빼고 토큰 입금 받는 것으로 로직 수정
+// (ex. tokenPerEth=3 일 경우 10개의 Token을 교환해달라는 요청을 받으면 3 wei로 교환이 가능하지만 1 Token은 wei로 교환이 불가능하므로 10 토큰 청을 받아도 9개 토큰만 3wei로 교환해준다.)
 
 /**
  * @title SafeMath
@@ -60,95 +59,6 @@ library SafeMath {
 
 
 
-
-contract MultiOwnable {
-    //address payable internal owner;
-    mapping(address => bool) public owner;
-    uint256 public numOfOwners;
-    uint256 public numOfVotes;
-    uint8 public numOfMinOwners;
-    bytes public proposedFuncName;
-    bytes4 public tempBytes4;
-    event AddedOwner(address newOwner);
-    event RemovedOwner(address removedOwner);
-
-
-    /* you have to use this contract to be inherited because it is internal.*/
-    constructor(address payable _leftCoOwner, address payable _rightCoOwner) public {
-        //owner = msg.sender;
-        require(_leftCoOwner != address(0x0) && _rightCoOwner != address(0x0));
-        owner[msg.sender] = true;
-        owner[_leftCoOwner] = true;
-        owner[_rightCoOwner] = true;
-        numOfOwners = 3;
-        numOfMinOwners = 3;
-        emit AddedOwner(msg.sender);
-        emit AddedOwner(_leftCoOwner);
-        emit AddedOwner(_rightCoOwner);
-    }
-
-    modifier onlyOwner() {
-        require(owner[msg.sender]);
-        _;
-    }
-
-    modifier committeeApproved() {
-      require(tempBytes4[0] == msg.data[0] && tempBytes4[1] == msg.data[1] && tempBytes4[2] == msg.data[2] && tempBytes4[3] == msg.data[3]);//check if proposedFunctionName and real function Name are correct
-      require(numOfVotes == numOfOwners);
-      _;
-      numOfVotes = 0;
-      proposedFuncName = bytes("");
-    }
-
-    function propose(string memory _targetFuncName) onlyOwner public {
-      require(numOfVotes == 0);
-      require(proposedFuncName.length == 0);
-
-      proposedFuncName = bytes(_targetFuncName);
-      tempBytes4 = bytes4(keccak256(proposedFuncName));
-      //vote();
-    }
-
-    function dismiss() onlyOwner public {
-
-    }
-
-    function vote() onlyOwner public {
-      //진행중인 제안이 있어야 투표할수 있다.
-      //onlyOnwers can vote, if there's ongoing proposal.
-      require(proposedFuncName.length != 0);
-      require(numOfOwners > numOfVotes);
-      numOfVotes++;
-    }
-
-    function transferOwnership(address payable _newOwner) onlyOwner committeeApproved public {
-        require( _newOwner != address(0x0) ); // callisto recommendation
-        owner[msg.sender] = false;
-        owner[_newOwner] = true;
-        emit RemovedOwner(msg.sender);
-        emit AddedOwner(_newOwner);
-    }
-
-
-    function addOwner(address payable _newOwner) onlyOwner committeeApproved public {
-        //require(tempBytes4[0] == msg.data[0] && tempBytes4[1] == msg.data[1] && tempBytes4[2] == msg.data[2] && tempBytes4[3] == msg.data[3]);//check if proposedFunctionName and real function Name are correct
-        require(_newOwner != address(0x0));
-        owner[_newOwner] = true;
-        numOfOwners++;
-        emit AddedOwner(_newOwner);
-    }
-
-    function removeOwner(address payable _toRemove) onlyOwner committeeApproved public {
-        require(_toRemove != address(0x0));
-        //require(_toRemove != msg.sender);
-        require(numOfOwners > numOfMinOwners); // must keep Number of Minimum Owners at least.
-        owner[_toRemove] = false;
-        numOfOwners--;
-        emit RemovedOwner(_toRemove);
-    }
-}
-
-
 contract Ownable {
     address internal owner;
 
@@ -163,7 +73,6 @@ contract Ownable {
     }
 
     function transferOwnership(address newOwner) onlyOwner public {
-        require( _newOwner != address(0x0) ); // callisto recommendation
         owner = newOwner;
     }
 }
@@ -205,25 +114,6 @@ contract Pausable is Ownable {
     }
 }
 
-/**
- * Contract Managing TokenExchanger's address used by ProxyNemodazΩ
- */
-contract RunningConctractManager is Pausable{
-    address internal implementation;
-
-    event Upgraded(address indexed newContract);
-
-    function upgrade(address _newAddr) onlyOwner external {
-        require(implementation != _newAddr);
-        implementation = _newAddr;
-        emit Upgraded(implementation);
-    }
-
-    function runningAddress() onlyOwner external view returns (address){
-        return implementation;
-    }
-}
-
 
 
 /**
@@ -231,7 +121,7 @@ contract RunningConctractManager is Pausable{
  * Written by Shin HyunJae
  * version 12
  */
-contract TokenERC20 is RunningConctractManager {
+contract TokenERC20 is Pausable {
     using SafeMath for uint256;
 
     // Public variables of the token
@@ -244,8 +134,6 @@ contract TokenERC20 is RunningConctractManager {
     mapping (address => uint256) public balances;
     mapping (address => mapping (address => uint256)) public allowed;
     mapping (address => bool) public frozenAccount;
-
-    bool private initialized = false;
 
     /**
      * This is area for some variables to add.
@@ -265,13 +153,13 @@ contract TokenERC20 is RunningConctractManager {
     event Approval(address indexed _owner, address indexed _spender, uint256 _value);
 
     // This notifies clients about the amount burnt
-    // event Burn(address indexed from, uint256 value); // callisto recommendation
+    event Burn(address indexed from, uint256 value);
 
     // This notifies clients about the freezing address
-    event FrozenFunds(address target, bool frozen); // callisto recommendation
+    event FrozenFunds(address target, bool frozen);
 
     /**
-     * Initialize Token Function
+     * Constructor function
      *
      * Initializes contract with initial supply tokens to the creator of the contract
      */
@@ -281,19 +169,16 @@ contract TokenERC20 is RunningConctractManager {
         string memory _tokenSymbol,
         uint256 _initialSupply
     ) internal onlyOwner {
-        require( initialized == false );
-        require(_initialSupply > 0 && _initialSupply <= 2**uint256(184)); // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101 => _initialSupply <= 2^184 <= (2^256 / 10^18)
-
         name = _tokenName;                                       // Set the name for display purposes
         symbol = _tokenSymbol;                                   // Set the symbol for display purposes
+
+        require(_initialSupply > 0 && _initialSupply <= 2**uint256(184)); // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101 => _initialSupply <= 2^184 <= (2^256 / 10^18)
         totalSupply = convertToDecimalUnits(_initialSupply);     // Update total supply with the decimal amount
 
         balances[msg.sender] = totalSupply;                     // Give the creator all initial tokens
         emit Transfer(address(this), msg.sender, totalSupply);
         emit LastBalance(address(this), 0);
         emit LastBalance(msg.sender, totalSupply);
-
-        initialized = true;
     }
 
 
@@ -338,8 +223,8 @@ contract TokenERC20 is RunningConctractManager {
     function _transfer(address _from, address _to, uint256 _value) internal {
         require(_to != address(0x0));                                            // Prevent transfer to 0x0 address. Use burn() instead
         require(balances[_from] >= _value);                             // Check if the sender has enough
-        require(!frozenAccount[_from]);    //callisto recommendation                             // Check if sender is frozen
-        require(!frozenAccount[_to]);      //callisto recommendation                             // Check if recipient is frozen
+        require(!frozenAccount[_from]);                                 // Check if sender is frozen
+        require(!frozenAccount[_to]);                                   // Check if recipient is frozen
         uint256 previousBalances = balances[_from].add(balances[_to]);  // Save this for an assertion in the future
 
         balances[_from] = balances[_from].sub(_value);                  // Subtract from the sender
@@ -361,7 +246,6 @@ contract TokenERC20 is RunningConctractManager {
      * @param _value the amount to send
      */
     function transfer(address _to, uint256 _value) public noReentrancy returns (bool success) {
-        require( _to != address(this) ); // callisto recommendation
         _transfer(msg.sender, _to, _value);
         success = true;
         return success;
@@ -419,7 +303,6 @@ contract TokenERC20 is RunningConctractManager {
      *
      * @param _value the amount of money to burn
      */
-    /* callisto recommendation
     function burn(uint256 _value) onlyOwner public returns (bool success) {
         require(balances[msg.sender] >= _value);                            // Check if the sender has enough
         balances[msg.sender] = balances[msg.sender].sub(_value);            // Subtract from the sender
@@ -428,7 +311,7 @@ contract TokenERC20 is RunningConctractManager {
         success = true;
         return success;
     }
-    */
+
     /**
      * Destroy tokens from other account
      *
@@ -437,7 +320,6 @@ contract TokenERC20 is RunningConctractManager {
      * @param _from the address of the sender
      * @param _value the amount of money to burn
      */
-     /* callisto recommendation
     function burnFrom(address _from, uint256 _value) onlyOwner public returns (bool success) {
         require(balances[_from] >= _value);                                         // Check if the targeted balance is enough
         require(allowed[_from][msg.sender] >= _value);                              // Check allowance
@@ -448,8 +330,6 @@ contract TokenERC20 is RunningConctractManager {
         success = true;
         return success;
     }
-    */
-
 
     /// @notice `freeze? Prevent` `target` from sending & receiving tokens
     /// @param target Address to be frozen
@@ -469,33 +349,34 @@ contract TokenERC20 is RunningConctractManager {
 
 
 /**
- * @title TokenExchanger
+ * @title NemoExchanger
  * @notice This is for exchange between Ether and 'Nemo' token
  *          It won't be needed after being listed on the exchange.
  */
 
-contract TokenExchanger is TokenERC20{
+contract NemoExchanger is TokenERC20{
   using SafeMath for uint256;
 
     uint256 internal tokenPerEth;
+    bool private exchangeOpened = true;
 
     event ExchangeEtherToToken(address indexed from, uint256 etherValue, uint256 tokenPerEth);
     event ExchangeTokenToEther(address indexed from, uint256 etherValue, uint256 tokenPerEth);
+    event ReserveEther(address indexed from, uint256 value);
+    event ReserveToken(address indexed from, uint256 alue);
     event WithdrawToken(address indexed to, uint256 value);
     event WithdrawEther(address indexed to, uint256 value);
     event SetExchangeRate(address indexed from, uint256 tokenPerEth);
 
 
-    /**
-     * Initialize Exchanger Function
-     *
-     * Initialize Exchanger contract with tokenPerEth
-     * and Initialize NemoCoin by calling initToken
-     * It would call initToken in TokenERC20 with _tokenName, _tokenSymbol, _initalSupply
-     */
+    modifier isOpen() {
+        require(exchangeOpened == true);
+        _;
+    }
+
     function initExchanger(
-        string calldata _tokenName,
-        string calldata _tokenSymbol,
+        string _tokenName,
+        string _tokenSymbol,
         uint256 _initialSupply,
         uint256 _tokenPerEth
     ) external onlyOwner {
@@ -506,14 +387,22 @@ contract TokenExchanger is TokenERC20{
         emit SetExchangeRate(msg.sender, tokenPerEth);
     }
 
-
     /**
-     * Change tokenPerEth variable only by owner
+     * set the setExchangeClosed variable flag
      *
-     * Because "TokenExchaner" is only used until be listed on the exchange,
-     * tokenPerEth is needed by then and it would be managed by manager.
+     * set the setExchangeClosed variable flag true to open this tokens exchanger
      */
-    function setExchangeRate(uint256 _tokenPerEth) onlyOwner external returns (bool success){
+    function setExchangeOpened() isOpen onlyOwner external {
+        exchangeOpened = false;
+    }
+
+    function getExchangeOpened() isOpen external view returns (bool _exchangeOpened) {
+        _exchangeOpened = exchangeOpened;
+        return _exchangeOpened;
+    }
+
+
+    function setExchangeRate(uint256 _tokenPerEth) isOpen onlyOwner external returns (bool success){
         require( _tokenPerEth > 0);
         tokenPerEth = _tokenPerEth;
         emit SetExchangeRate(msg.sender, tokenPerEth);
@@ -522,7 +411,7 @@ contract TokenExchanger is TokenERC20{
         return success;
     }
 
-    function getExchangerRate() onlyOwner external view returns(uint256){
+    function getExchangerRate() isOpen onlyOwner external view returns(uint256){
         return tokenPerEth;
     }
 
@@ -531,7 +420,7 @@ contract TokenExchanger is TokenERC20{
      *
      * @notice Send `Nemo` tokens to msg sender as much as amount of ether received considering exchangeRate.
      */
-    function exchangeEtherToToken() payable external noReentrancy returns (bool success){
+    function exchangeEtherToToken() payable external isOpen noReentrancy returns (bool success){
         uint256 tokenPayment;
         uint256 ethAmount = msg.value;
 
@@ -554,7 +443,7 @@ contract TokenExchanger is TokenERC20{
      *
      * @param _value Amount of 'Nemo' token
      */
-    function exchangeTokenToEther(uint256 _value) external noReentrancy returns (bool success){
+    function exchangeTokenToEther(uint256 _value) external isOpen noReentrancy returns (bool success){
       require(tokenPerEth != 0);
 
       uint256 remainingEthBalance = address(this).balance;
@@ -572,95 +461,50 @@ contract TokenExchanger is TokenERC20{
     }
 
     /**
-     * Withdraw token from TokenExchanger contract
+     * Reserve Ether
+     *
+     * @notice Send Ether to NemoExchanger for exchange service.
+     */
+    function reserveEther() payable isOpen onlyOwner external {
+      emit ReserveEther(msg.sender, msg.value);
+    }
+
+    /**
+     * Reserve Token
+     *
+     * @notice Send `Nemo` tokens to NemoExchanger for exchange service.
+     */
+    function reserveToken(uint256 _value) isOpen onlyOwner external {
+      super._transfer(msg.sender, address(this), _value);
+      emit ReserveToken(msg.sender, _value);
+    }
+
+    /**
+     * Withdraw token from NemoExchanger contract
      *
      * @notice Withdraw charged Token to _recipient.
      *
      * @param _recipient The address to which the token was issued.
      * @param _value Amount of token to withdraw.
      */
-    function withdrawToken(address _recipient, uint256 _value) onlyOwner noReentrancy public{
+    function withdrawToken(address _recipient, uint256 _value) onlyOwner noReentrancy public {
       super._transfer(address(this) ,_recipient, _value);
       emit WithdrawToken(_recipient, _value);
-
     }
 
 
     /**
-     * Withdraw Ether from TokenExchanger contract
+     * Withdraw Ether from NemoExchanger contract
      *
      * @notice Withdraw charged Ether to _recipient.
      *
      * @param _recipient The address to which the Ether was issued.
      * @param _value Amount of Ether to withdraw.
      */
-    function withdrawEther(address payable _recipient, uint256 _value) onlyOwner noReentrancy public {
+    function withdrawEther(address _recipient, uint256 _value) onlyOwner noReentrancy public {
         require(_recipient.send(_value));
         emit WithdrawEther(_recipient, _value);
 
     }
-}
 
-
-/**
- * @title NemodaxStorage
- *
- * @dev This is contract for proxyNemodax data order list.
- *      Contract shouldn't be changed as possible.
- *      If it should be edited, please add from the end of the contract .
- */
-
-contract NemodaxStorage is RunningConctractManager {
-
-    // Never ever change the order of variables below!!!!
-    // Public variables of the token
-    string public name;
-    string public symbol;
-    uint8 public decimals = 18;    // 18 decimals is the strongly suggested default, avoid changing it
-    uint256 public totalSupply;
-
-    /* This creates an array with all balances */
-    mapping (address => uint256) public balances;
-    mapping (address => mapping (address => uint256)) public allowed;
-    mapping (address => bool) public frozenAccount; //callisto recommendation
-
-    bool private initialized = false;
-
-    uint256 internal tokenPerEth;
-    constructor() Ownable() internal {}
-}
-
-/**
- * @title ProxyNemodax
- *
- * @dev The only fallback function will forward transaction to TokenExchanger Contract.
- *      and the result of calculation would be stored in ProxyNemodax
- *
- */
-
-contract ProxyNemodax is NemodaxStorage {
-
-    function () payable external {
-        address localImpl = implementation;
-        require(localImpl != address(0x0));
-
-        assembly {
-            let ptr := mload(0x40)
-
-            switch calldatasize
-            case 0 {  } // just to receive ethereum
-
-            default{
-                calldatacopy(ptr, 0, calldatasize)
-
-                let result := delegatecall(gas, localImpl, ptr, calldatasize, 0, 0)
-                let size := returndatasize
-                returndatacopy(ptr, 0, size)
-                switch result
-
-                case 0 { revert(ptr, size) }
-                default { return(ptr, size) }
-            }
-        }
-    }
 }
