@@ -1,9 +1,9 @@
-// 
+//
 // callisto recommendation 수정
 // 1. 가스 최적화 (struct 구조로 변경)
 // 2. 초기화시 proposedFuncHash 도 초기화
 // 3. transferOwnership 수행시 msg.sender의 owner자격이 새 Owner에게 이양되고 dismiss시에 onlyOwner를 다시 체크할때 권한이 없는 문제가 있어 dismiss / _dismiss 구조로 wrapper 함수를 추가
-
+// 4. ProxyNemodax & TokenExchanger 에  MultiOwnable 적용
 
 pragma solidity 0.5.4;
 
@@ -58,27 +58,37 @@ library SafeMath {
   }
 }
 
-contract MultiOwnable {
 
+
+contract MultiOwnable {
+    // To save some gas, choosing the struct.
     struct CommitteeStatusPack{
         uint8 numOfOwners;
         uint8 numOfVotes;
         uint8 numOfMinOwners;
-        string proposedFuncName;
         bytes4 proposedFuncHash;
+        string proposedFuncName;
     }
     CommitteeStatusPack public committeeStatus;
 
-    address[] public ballot;
+    address[] public ballot; // To make sure if it already were voted
     mapping(address => bool) public owner;
     bytes public msgData; // for test variable
+
+    event Vote(string proposedFuncName, bytes4 proposedFuncHash, address proposer);
+    event Propose(string proposedFuncName, bytes4 proposedFuncHash, address proposer);
+    event Dismiss(string proposedFuncName, bytes4 proposedFuncHash, address proposer);
     event AddedOwner(address newOwner);
     event RemovedOwner(address removedOwner);
+    event TransferOwnership(address from, address to);
 
 
     /* you have to use this contract to be inherited because it is internal.*/
-    constructor(address payable _coOwner1, address payable _coOwner2, address payable _coOwner3) public {
-        require(_coOwner1 != address(0x0) && _coOwner2 != address(0x0) && _coOwner3 != address(0x0));
+    constructor(address payable _coOwner1, address payable _coOwner2, address payable _coOwner3) internal {
+        require(_coOwner1 != address(0x0) &&
+                _coOwner2 != address(0x0) &&
+                _coOwner3 != address(0x0));
+
         owner[_coOwner1] = true;
         owner[_coOwner2] = true;
         owner[_coOwner3] = true;
@@ -96,9 +106,14 @@ contract MultiOwnable {
     }
 
     modifier committeeApproved() {
-      msgData = msg.data;
-      require(committeeStatus.proposedFuncHash[0] == msg.data[0] && committeeStatus.proposedFuncHash[1] == msg.data[1] && committeeStatus.proposedFuncHash[2] == msg.data[2] && committeeStatus.proposedFuncHash[3] == msg.data[3]);//check if proposedFunctionName and real function Name are correct
-      require(committeeStatus.numOfVotes == committeeStatus.numOfOwners);
+      //msgData = msg.data; //for test
+      //check if proposedFunctionName and real function Name are correct
+      require(committeeStatus.proposedFuncHash[0] == msg.data[0] &&
+                committeeStatus.proposedFuncHash[1] == msg.data[1] &&
+                committeeStatus.proposedFuncHash[2] == msg.data[2] &&
+                committeeStatus.proposedFuncHash[3] == msg.data[3]);
+
+      require(committeeStatus.numOfVotes == committeeStatus.numOfOwners); //To check unanimity
       _;
       _dismiss();
     }
@@ -110,6 +125,7 @@ contract MultiOwnable {
 
       committeeStatus.proposedFuncName = _targetFuncName;
       committeeStatus.proposedFuncHash = bytes4(keccak256(bytes(_targetFuncName)));
+      emit Propose(committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash, msg.sender);
     }
 
     function dismiss() onlyOwner public {
@@ -121,6 +137,7 @@ contract MultiOwnable {
       committeeStatus.proposedFuncName = "";
       committeeStatus.proposedFuncHash = bytes4("");
       delete ballot;
+      emit Dismiss(committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash, msg.sender);
     }
 
     function vote() onlyOwner public {
@@ -138,6 +155,7 @@ contract MultiOwnable {
       require(committeeStatus.numOfOwners > committeeStatus.numOfVotes);
       committeeStatus.numOfVotes++;
       ballot.push(msg.sender);
+      emit Vote(committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash, msg.sender);
     }
 
     function transferOwnership(address payable _newOwner) onlyOwner committeeApproved public {
@@ -145,8 +163,7 @@ contract MultiOwnable {
         require( owner[_newOwner] == false );
         owner[msg.sender] = false;
         owner[_newOwner] = true;
-        emit RemovedOwner(msg.sender);
-        emit AddedOwner(_newOwner);
+        emit TransferOwnership(msg.sender, _newOwner);
     }
 
 
@@ -170,7 +187,6 @@ contract MultiOwnable {
 
 
 
-
 contract Ownable {
     address internal owner;
 
@@ -184,13 +200,13 @@ contract Ownable {
         _;
     }
 
-    function transferOwnership(address newOwner) onlyOwner public {
+    function transferOwnership(address _newOwner) onlyOwner public {
         require( _newOwner != address(0x0) ); // callisto recommendation
-        owner = newOwner;
+        owner = _newOwner;
     }
 }
 
-contract Pausable is Ownable {
+contract Pausable is MultiOwnable {
     event Pause();
     event Unpause();
 
@@ -216,12 +232,13 @@ contract Pausable is Ownable {
     /* When you discover your smart contract is under attack, you can buy time to upgrade the contract by
        immediately pausing the contract.
      */
-    function pause() public onlyOwner whenNotPaused {
+    //function pause() public onlyOwner whenNotPaused {
+    function pause() public onlyOwner committeeApproved whenNotPaused {
         paused = true;
         emit Pause();
     }
 
-    function unpause() public onlyOwner whenPaused {
+    function unpause() public onlyOwner committeeApproved whenPaused {
         paused = false;
         emit Unpause();
     }
@@ -235,7 +252,7 @@ contract RunningConctractManager is Pausable{
 
     event Upgraded(address indexed newContract);
 
-    function upgrade(address _newAddr) onlyOwner external {
+    function upgrade(address _newAddr) onlyOwner committeeApproved external {
         require(implementation != _newAddr);
         implementation = _newAddr;
         emit Upgraded(implementation);
@@ -302,7 +319,7 @@ contract TokenERC20 is RunningConctractManager {
         string memory _tokenName,
         string memory _tokenSymbol,
         uint256 _initialSupply
-    ) internal onlyOwner {
+    ) internal onlyOwner committeeApproved {
         require( initialized == false );
         require(_initialSupply > 0 && _initialSupply <= 2**uint256(184)); // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101 => _initialSupply <= 2^184 <= (2^256 / 10^18)
 
@@ -475,14 +492,14 @@ contract TokenERC20 is RunningConctractManager {
 
     /// @notice `freeze? Prevent` `target` from sending & receiving tokens
     /// @param target Address to be frozen
-    function freezeAccount(address target) onlyOwner public {
+    function freezeAccount(address target) onlyOwner committeeApproved public {
         frozenAccount[target] = true;
         emit FrozenFunds(target, true);
     }
 
     /// @notice `freeze? Allow` `target` from sending & receiving tokens
     /// @param target Address to be unfrozen
-    function unfreezeAccount(address target) onlyOwner public {
+    function unfreezeAccount(address target) onlyOwner committeeApproved public {
         frozenAccount[target] = false;
         emit FrozenFunds(target, false);
     }
@@ -508,6 +525,11 @@ contract TokenExchanger is TokenERC20{
     event SetExchangeRate(address indexed from, uint256 tokenPerEth);
 
 
+    constructor(address payable _coOwner1,
+                address payable _coOwner2,
+                address payable _coOwner3)
+        MultiOwnable( _coOwner1, _coOwner2, _coOwner3) public {}
+
     /**
      * Initialize Exchanger Function
      *
@@ -520,7 +542,7 @@ contract TokenExchanger is TokenERC20{
         string calldata _tokenSymbol,
         uint256 _initialSupply,
         uint256 _tokenPerEth
-    ) external onlyOwner {
+    ) external onlyOwner committeeApproved {
         require(_tokenPerEth > 0 && _initialSupply > 0);  // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101
 
         super.initToken(_tokenName, _tokenSymbol, _initialSupply);
@@ -535,7 +557,7 @@ contract TokenExchanger is TokenERC20{
      * Because "TokenExchaner" is only used until be listed on the exchange,
      * tokenPerEth is needed by then and it would be managed by manager.
      */
-    function setExchangeRate(uint256 _tokenPerEth) onlyOwner external returns (bool success){
+    function setExchangeRate(uint256 _tokenPerEth) onlyOwner committeeApproved external returns (bool success){
         require( _tokenPerEth > 0);
         tokenPerEth = _tokenPerEth;
         emit SetExchangeRate(msg.sender, tokenPerEth);
@@ -544,7 +566,7 @@ contract TokenExchanger is TokenERC20{
         return success;
     }
 
-    function getExchangerRate() onlyOwner external view returns(uint256){
+    function getExchangerRate() external view returns(uint256){
         return tokenPerEth;
     }
 
@@ -601,7 +623,7 @@ contract TokenExchanger is TokenERC20{
      * @param _recipient The address to which the token was issued.
      * @param _value Amount of token to withdraw.
      */
-    function withdrawToken(address _recipient, uint256 _value) onlyOwner noReentrancy public{
+    function withdrawToken(address _recipient, uint256 _value) onlyOwner committeeApproved noReentrancy public{
       super._transfer(address(this) ,_recipient, _value);
       emit WithdrawToken(_recipient, _value);
 
@@ -616,7 +638,7 @@ contract TokenExchanger is TokenERC20{
      * @param _recipient The address to which the Ether was issued.
      * @param _value Amount of Ether to withdraw.
      */
-    function withdrawEther(address payable _recipient, uint256 _value) onlyOwner noReentrancy public {
+    function withdrawEther(address payable _recipient, uint256 _value) onlyOwner committeeApproved noReentrancy public {
         require(_recipient.send(_value));
         emit WithdrawEther(_recipient, _value);
 
@@ -649,7 +671,8 @@ contract NemodaxStorage is RunningConctractManager {
     bool private initialized = false;
 
     uint256 internal tokenPerEth;
-    constructor() Ownable() internal {}
+    //constructor() Ownable() internal {}
+
 }
 
 /**
@@ -661,6 +684,11 @@ contract NemodaxStorage is RunningConctractManager {
  */
 
 contract ProxyNemodax is NemodaxStorage {
+
+    constructor(address payable _coOwner1,
+                address payable _coOwner2,
+                address payable _coOwner3)
+        MultiOwnable( _coOwner1, _coOwner2, _coOwner3) public {}
 
     function () payable external {
         address localImpl = implementation;
