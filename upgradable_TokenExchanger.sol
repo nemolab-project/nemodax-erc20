@@ -68,23 +68,24 @@ contract MultiOwnable {
     uint256 public numOfVotes;
     uint8 public numOfMinOwners;
     bytes public proposedFuncName;
-    bytes4 public tempBytes4;
+    bytes4 public proposedFuncHash;
+    address[] public ballot;
     event AddedOwner(address newOwner);
     event RemovedOwner(address removedOwner);
 
 
     /* you have to use this contract to be inherited because it is internal.*/
-    constructor(address payable _leftCoOwner, address payable _rightCoOwner) public {
+    constructor(address payable _coOwner1, address payable _coOwner2, address payable _coOwner3) public {
         //owner = msg.sender;
-        require(_leftCoOwner != address(0x0) && _rightCoOwner != address(0x0));
-        owner[msg.sender] = true;
-        owner[_leftCoOwner] = true;
-        owner[_rightCoOwner] = true;
+        require(_coOwner1 != address(0x0) && _coOwner2 != address(0x0) && _coOwner3 != address(0x0));
+        owner[_coOwner1] = true;
+        owner[_coOwner2] = true;
+        owner[_coOwner3] = true;
         numOfOwners = 3;
         numOfMinOwners = 3;
-        emit AddedOwner(msg.sender);
-        emit AddedOwner(_leftCoOwner);
-        emit AddedOwner(_rightCoOwner);
+        emit AddedOwner(_coOwner1);
+        emit AddedOwner(_coOwner2);
+        emit AddedOwner(_coOwner3);
     }
 
     modifier onlyOwner() {
@@ -93,11 +94,10 @@ contract MultiOwnable {
     }
 
     modifier committeeApproved() {
-      require(tempBytes4[0] == msg.data[0] && tempBytes4[1] == msg.data[1] && tempBytes4[2] == msg.data[2] && tempBytes4[3] == msg.data[3]);//check if proposedFunctionName and real function Name are correct
+      require(proposedFuncHash[0] == msg.data[0] && proposedFuncHash[1] == msg.data[1] && proposedFuncHash[2] == msg.data[2] && proposedFuncHash[3] == msg.data[3]);//check if proposedFunctionName and real function Name are correct
       require(numOfVotes == numOfOwners);
       _;
-      numOfVotes = 0;
-      proposedFuncName = bytes("");
+      dismiss();
     }
 
     function propose(string memory _targetFuncName) onlyOwner public {
@@ -105,20 +105,27 @@ contract MultiOwnable {
       require(proposedFuncName.length == 0);
 
       proposedFuncName = bytes(_targetFuncName);
-      tempBytes4 = bytes4(keccak256(proposedFuncName));
-      //vote();
+      proposedFuncHash = bytes4(keccak256(proposedFuncName));
     }
 
     function dismiss() onlyOwner public {
-
+      numOfVotes = 0;
+      proposedFuncName = bytes("");
+      proposedFuncHash = bytes4("");
+      delete ballot;
     }
 
     function vote() onlyOwner public {
       //진행중인 제안이 있어야 투표할수 있다.
       //onlyOnwers can vote, if there's ongoing proposal.
+      for(uint i=0; i<ballot.length; i++){
+        require(ballot[i] != msg.sender);
+      }
+
       require(proposedFuncName.length != 0);
       require(numOfOwners > numOfVotes);
       numOfVotes++;
+      ballot.push(msg.sender);
     }
 
     function transferOwnership(address payable _newOwner) onlyOwner committeeApproved public {
@@ -131,7 +138,7 @@ contract MultiOwnable {
 
 
     function addOwner(address payable _newOwner) onlyOwner committeeApproved public {
-        //require(tempBytes4[0] == msg.data[0] && tempBytes4[1] == msg.data[1] && tempBytes4[2] == msg.data[2] && tempBytes4[3] == msg.data[3]);//check if proposedFunctionName and real function Name are correct
+        //require(proposedFuncHash[0] == msg.data[0] && proposedFuncHash[1] == msg.data[1] && proposedFuncHash[2] == msg.data[2] && proposedFuncHash[3] == msg.data[3]);//check if proposedFunctionName and real function Name are correct
         require(_newOwner != address(0x0));
         owner[_newOwner] = true;
         numOfOwners++;
@@ -147,6 +154,7 @@ contract MultiOwnable {
         emit RemovedOwner(_toRemove);
     }
 }
+
 
 
 contract Ownable {
