@@ -1,9 +1,9 @@
-// commit a1a45774f86addbde21e6b7517fbc30801b9510f
+// 
 // callisto recommendation 수정
-// 1. initToken / initExchanger는 오직 한번만 실행 가능토록 initialized 변수 추가
-// 2. ERC20 토큰 burn 기눙 삭제
-// 3. transferOwnership 수행시 널주소 체크 로직 추가
-// 4. multiple ownership 구현중
+// 1. 가스 최적화 (struct 구조로 변경)
+// 2. 초기화시 proposedFuncHash 도 초기화
+// 3. transferOwnership 수행시 msg.sender의 owner자격이 새 Owner에게 이양되고 dismiss시에 onlyOwner를 다시 체크할때 권한이 없는 문제가 있어 dismiss / _dismiss 구조로 wrapper 함수를 추가
+
 
 pragma solidity 0.5.4;
 
@@ -58,31 +58,33 @@ library SafeMath {
   }
 }
 
-
-
-
 contract MultiOwnable {
-    //address payable internal owner;
-    mapping(address => bool) public owner;
-    uint256 public numOfOwners;
-    uint256 public numOfVotes;
-    uint8 public numOfMinOwners;
-    bytes public proposedFuncName;
-    bytes4 public proposedFuncHash;
+
+    struct CommitteeStatusPack{
+        uint8 numOfOwners;
+        uint8 numOfVotes;
+        uint8 numOfMinOwners;
+        string proposedFuncName;
+        bytes4 proposedFuncHash;
+    }
+    CommitteeStatusPack public committeeStatus;
+
     address[] public ballot;
+    mapping(address => bool) public owner;
+    bytes public msgData; // for test variable
     event AddedOwner(address newOwner);
     event RemovedOwner(address removedOwner);
 
 
     /* you have to use this contract to be inherited because it is internal.*/
     constructor(address payable _coOwner1, address payable _coOwner2, address payable _coOwner3) public {
-        //owner = msg.sender;
         require(_coOwner1 != address(0x0) && _coOwner2 != address(0x0) && _coOwner3 != address(0x0));
         owner[_coOwner1] = true;
         owner[_coOwner2] = true;
         owner[_coOwner3] = true;
-        numOfOwners = 3;
-        numOfMinOwners = 3;
+        committeeStatus.numOfOwners = 3;
+        committeeStatus.numOfMinOwners = 3;
+        committeeStatus.proposedFuncHash = bytes4("");
         emit AddedOwner(_coOwner1);
         emit AddedOwner(_coOwner2);
         emit AddedOwner(_coOwner3);
@@ -94,42 +96,53 @@ contract MultiOwnable {
     }
 
     modifier committeeApproved() {
-      require(proposedFuncHash[0] == msg.data[0] && proposedFuncHash[1] == msg.data[1] && proposedFuncHash[2] == msg.data[2] && proposedFuncHash[3] == msg.data[3]);//check if proposedFunctionName and real function Name are correct
-      require(numOfVotes == numOfOwners);
+      msgData = msg.data;
+      require(committeeStatus.proposedFuncHash[0] == msg.data[0] && committeeStatus.proposedFuncHash[1] == msg.data[1] && committeeStatus.proposedFuncHash[2] == msg.data[2] && committeeStatus.proposedFuncHash[3] == msg.data[3]);//check if proposedFunctionName and real function Name are correct
+      require(committeeStatus.numOfVotes == committeeStatus.numOfOwners);
       _;
-      dismiss();
+      _dismiss();
     }
 
     function propose(string memory _targetFuncName) onlyOwner public {
-      require(numOfVotes == 0);
-      require(proposedFuncName.length == 0);
+      require(committeeStatus.numOfVotes == 0);
+      string memory strFuncName = committeeStatus.proposedFuncName;
+      require(bytes(strFuncName).length == 0);
 
-      proposedFuncName = bytes(_targetFuncName);
-      proposedFuncHash = bytes4(keccak256(proposedFuncName));
+      committeeStatus.proposedFuncName = _targetFuncName;
+      committeeStatus.proposedFuncHash = bytes4(keccak256(bytes(_targetFuncName)));
     }
 
     function dismiss() onlyOwner public {
-      numOfVotes = 0;
-      proposedFuncName = bytes("");
-      proposedFuncHash = bytes4("");
+      _dismiss();
+    }
+
+    function _dismiss() internal {
+      committeeStatus.numOfVotes = 0;
+      committeeStatus.proposedFuncName = "";
+      committeeStatus.proposedFuncHash = bytes4("");
       delete ballot;
     }
 
     function vote() onlyOwner public {
+      // Check duplicated voting list.
+
+      for(uint i=0; i<ballot.length; i++)
+        require(ballot[i] != msg.sender);
+
       //진행중인 제안이 있어야 투표할수 있다.
       //onlyOnwers can vote, if there's ongoing proposal.
-      for(uint i=0; i<ballot.length; i++){
-        require(ballot[i] != msg.sender);
-      }
+      string memory strFuncName = committeeStatus.proposedFuncName;
+      require( bytes(strFuncName).length != 0);
 
-      require(proposedFuncName.length != 0);
-      require(numOfOwners > numOfVotes);
-      numOfVotes++;
+      //Check, if everyone voted.
+      require(committeeStatus.numOfOwners > committeeStatus.numOfVotes);
+      committeeStatus.numOfVotes++;
       ballot.push(msg.sender);
     }
 
     function transferOwnership(address payable _newOwner) onlyOwner committeeApproved public {
         require( _newOwner != address(0x0) ); // callisto recommendation
+        require( owner[_newOwner] == false );
         owner[msg.sender] = false;
         owner[_newOwner] = true;
         emit RemovedOwner(msg.sender);
@@ -138,22 +151,23 @@ contract MultiOwnable {
 
 
     function addOwner(address payable _newOwner) onlyOwner committeeApproved public {
-        //require(proposedFuncHash[0] == msg.data[0] && proposedFuncHash[1] == msg.data[1] && proposedFuncHash[2] == msg.data[2] && proposedFuncHash[3] == msg.data[3]);//check if proposedFunctionName and real function Name are correct
-        require(_newOwner != address(0x0));
+        require( _newOwner != address(0x0) );
+        require( owner[_newOwner] != true );
         owner[_newOwner] = true;
-        numOfOwners++;
+        committeeStatus.numOfOwners++;
         emit AddedOwner(_newOwner);
     }
 
     function removeOwner(address payable _toRemove) onlyOwner committeeApproved public {
-        require(_toRemove != address(0x0));
-        //require(_toRemove != msg.sender);
-        require(numOfOwners > numOfMinOwners); // must keep Number of Minimum Owners at least.
+        require( _toRemove != address(0x0) );
+        require( owner[_toRemove] == true );
+        require( committeeStatus.numOfOwners > committeeStatus.numOfMinOwners ); // must keep Number of Minimum Owners at least.
         owner[_toRemove] = false;
-        numOfOwners--;
+        committeeStatus.numOfOwners--;
         emit RemovedOwner(_toRemove);
     }
 }
+
 
 
 
