@@ -1,5 +1,5 @@
-//
-// callisto recommendation 수정
+// [v0.2.11] 변경사항 (다중 소유자 구조 적용, 테스트 완료)
+// 0. callisto recommendation 수정
 // 1. 가스 최적화 (struct 구조로 변경)
 // 2. 초기화시 proposedFuncHash 도 초기화
 // 3. transferOwnership 수행시 msg.sender의 owner자격이 새 Owner에게 이양되고 dismiss시에 onlyOwner를 다시 체크할때 권한이 없는 문제가 있어 dismiss / _dismiss 구조로 wrapper 함수를 추가
