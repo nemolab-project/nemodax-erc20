@@ -1,9 +1,7 @@
-// [v0.2.11] 변경사항 (다중 소유자 구조 적용, 테스트 완료)
-// 0. callisto recommendation 수정
-// 1. 가스 최적화 (struct 구조로 변경)
-// 2. 초기화시 proposedFuncHash 도 초기화
-// 3. transferOwnership 수행시 msg.sender의 owner자격이 새 Owner에게 이양되고 dismiss시에 onlyOwner를 다시 체크할때 권한이 없는 문제가 있어 dismiss / _dismiss 구조로 wrapper 함수를 추가
-// 4. ProxyNemodax & TokenExchanger 에  MultiOwnable 적용
+// [v0.2.12] 추가 사항
+// frozen Expiration 개념 도입
+// 테스트 완료
+// 계좌 동결시 timestamp 값으로 동결이 풀리는 만료시간을 등록
 
 pragma solidity 0.5.4;
 
@@ -58,11 +56,21 @@ library SafeMath {
   }
 }
 
-
+/**
+ * @title MultiOwnable
+ *
+ * @dev Allows multiple owners to unanimously decide on the use and accessibility of features
+ *      when restrictions on access to critical functions are required.
+ *
+ */
 
 contract MultiOwnable {
-    // To save some gas, choosing the struct.
+
     struct CommitteeStatusPack{
+      /**
+       * Key informations for decisions.
+       * To save some gas, chose the struct.
+       */
         uint8 numOfOwners;
         uint8 numOfVotes;
         uint8 numOfMinOwners;
@@ -71,19 +79,25 @@ contract MultiOwnable {
     }
     CommitteeStatusPack public committeeStatus;
 
-    address[] public ballot; // To make sure if it already were voted
+    address[] public ballot; // To make sure if it already was voted
     mapping(address => bool) public owner;
-    bytes public msgData; // for test variable
 
-    event Vote(string proposedFuncName, bytes4 proposedFuncHash, address proposer);
-    event Propose(string proposedFuncName, bytes4 proposedFuncHash, address proposer);
-    event Dismiss(string proposedFuncName, bytes4 proposedFuncHash, address proposer);
+    event Vote(address indexed proposer, string indexed proposedFuncName, bytes4 proposedFuncHash);
+    event Propose(address indexed proposer, string indexed proposedFuncName, bytes4 proposedFuncHash);
+    event Dismiss(address indexed proposer, string indexed proposedFuncName, bytes4 proposedFuncHash);
     event AddedOwner(address newOwner);
     event RemovedOwner(address removedOwner);
     event TransferOwnership(address from, address to);
 
 
-    /* you have to use this contract to be inherited because it is internal.*/
+    /**
+     * Organize initial commitee.
+     *
+     * @notice committee must be 3 at least.
+     *         you have to use this contract to be inherited because it is internal.
+     *
+     * @param _coOwner1, _coOwner2, _coOwner3 commitee members
+     */
     constructor(address payable _coOwner1, address payable _coOwner2, address payable _coOwner3) internal {
         require(_coOwner1 != address(0x0) &&
                 _coOwner2 != address(0x0) &&
@@ -94,59 +108,92 @@ contract MultiOwnable {
         owner[_coOwner3] = true;
         committeeStatus.numOfOwners = 3;
         committeeStatus.numOfMinOwners = 3;
-        committeeStatus.proposedFuncHash = bytes4("");
         emit AddedOwner(_coOwner1);
         emit AddedOwner(_coOwner2);
         emit AddedOwner(_coOwner3);
     }
+
 
     modifier onlyOwner() {
         require(owner[msg.sender]);
         _;
     }
 
+    /**
+     * Pre-check if it's decided by committee
+     *
+     * @notice If the function is unanimously approved,
+     *         the function with this modifier will not be executed.
+     */
     modifier committeeApproved() {
-      //msgData = msg.data; //for test
-      //check if proposedFunctionName and real function Name are correct
+      /* check if proposed Function Name and real function Name are correct */
       require(committeeStatus.proposedFuncHash[0] == msg.data[0] &&
                 committeeStatus.proposedFuncHash[1] == msg.data[1] &&
                 committeeStatus.proposedFuncHash[2] == msg.data[2] &&
                 committeeStatus.proposedFuncHash[3] == msg.data[3]);
 
-      require(committeeStatus.numOfVotes == committeeStatus.numOfOwners); //To check unanimity
+      /* To check unanimity */
+      require(committeeStatus.numOfVotes == committeeStatus.numOfOwners);
       _;
-      _dismiss();
+      _dismiss(); //Once a commission-approved proposal is made, the proposal is initialized.
     }
 
+    /**
+     * Suggest the functions you want to use.
+     *
+     * @notice To use some importan functions, propose function must be done first and voted.
+     */
     function propose(string memory _targetFuncName) onlyOwner public {
+      /* Check if there're any ongoing proposals */
       require(committeeStatus.numOfVotes == 0);
       string memory strFuncName = committeeStatus.proposedFuncName;
       require(bytes(strFuncName).length == 0);
 
+      /* regist function informations that proposer want to run */
       committeeStatus.proposedFuncName = _targetFuncName;
       committeeStatus.proposedFuncHash = bytes4(keccak256(bytes(_targetFuncName)));
-      emit Propose(committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash, msg.sender);
+      emit Propose(msg.sender, committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash);
     }
 
+    /**
+     * Proposal is withdrawn
+     *
+     * @notice When the proposed function is no longer used or deprecated,
+     *         proposal is discarded
+     */
     function dismiss() onlyOwner public {
       _dismiss();
     }
 
+    /**
+     * Suggest the functions you want to use.
+     *
+     * @notice 'dismiss' is executed even after successfully executing the proposed function.
+     *          If 'msg.sender' want to pass permission, he can't pass the 'committeeApproved' modifier.
+     *          internal functions are required to enable this.
+     */
+
     function _dismiss() internal {
+      emit Dismiss(msg.sender, committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash);
       committeeStatus.numOfVotes = 0;
       committeeStatus.proposedFuncName = "";
       committeeStatus.proposedFuncHash = bytes4("");
       delete ballot;
-      emit Dismiss(committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash, msg.sender);
     }
 
+
+    /**
+     * Owners vote for proposed item
+     *
+     * @notice if only there're proposals, 'vote' is processed.
+     *         the result must be unanimity.
+     *         one ticket for each owner.
+     */
     function vote() onlyOwner public {
       // Check duplicated voting list.
-
       for(uint i=0; i<ballot.length; i++)
         require(ballot[i] != msg.sender);
 
-      //진행중인 제안이 있어야 투표할수 있다.
       //onlyOnwers can vote, if there's ongoing proposal.
       string memory strFuncName = committeeStatus.proposedFuncName;
       require( bytes(strFuncName).length != 0);
@@ -155,9 +202,16 @@ contract MultiOwnable {
       require(committeeStatus.numOfOwners > committeeStatus.numOfVotes);
       committeeStatus.numOfVotes++;
       ballot.push(msg.sender);
-      emit Vote(committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash, msg.sender);
+      emit Vote(msg.sender, committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash);
     }
 
+
+    /**
+     * Existing owner transfers permissions to new owner.
+     *
+     * @notice It transfers authority to the person who was not the owner.
+     *           Approval from the committee is required.
+     */
     function transferOwnership(address payable _newOwner) onlyOwner committeeApproved public {
         require( _newOwner != address(0x0) ); // callisto recommendation
         require( owner[_newOwner] == false );
@@ -166,7 +220,12 @@ contract MultiOwnable {
         emit TransferOwnership(msg.sender, _newOwner);
     }
 
-
+    /**
+     * Add new Owner to committee
+     *
+     * @notice Approval from the committee is required.
+     *
+     */
     function addOwner(address payable _newOwner) onlyOwner committeeApproved public {
         require( _newOwner != address(0x0) );
         require( owner[_newOwner] != true );
@@ -175,6 +234,12 @@ contract MultiOwnable {
         emit AddedOwner(_newOwner);
     }
 
+    /**
+     * Remove the Owner from committee
+     *
+     * @notice Approval from the committee is required.
+     *
+     */
     function removeOwner(address payable _toRemove) onlyOwner committeeApproved public {
         require( _toRemove != address(0x0) );
         require( owner[_toRemove] == true );
@@ -182,27 +247,6 @@ contract MultiOwnable {
         owner[_toRemove] = false;
         committeeStatus.numOfOwners--;
         emit RemovedOwner(_toRemove);
-    }
-}
-
-
-
-contract Ownable {
-    address internal owner;
-
-    /* you have to use this contract to be inherited because it is internal.*/
-    constructor() internal {
-        owner = msg.sender;
-    }
-
-    modifier onlyOwner() {
-        require(msg.sender == owner);
-        _;
-    }
-
-    function transferOwnership(address _newOwner) onlyOwner public {
-        require( _newOwner != address(0x0) ); // callisto recommendation
-        owner = _newOwner;
     }
 }
 
@@ -282,7 +326,8 @@ contract TokenERC20 is RunningConctractManager {
     /* This creates an array with all balances */
     mapping (address => uint256) public balances;
     mapping (address => mapping (address => uint256)) public allowed;
-    mapping (address => bool) public frozenAccount;
+    //mapping (address => bool) public frozenAccount;
+    mapping (address => uint256) public frozenExpired;
 
     bool private initialized = false;
 
@@ -377,8 +422,15 @@ contract TokenERC20 is RunningConctractManager {
     function _transfer(address _from, address _to, uint256 _value) internal {
         require(_to != address(0x0));                                            // Prevent transfer to 0x0 address. Use burn() instead
         require(balances[_from] >= _value);                             // Check if the sender has enough
-        require(!frozenAccount[_from]);    //callisto recommendation                             // Check if sender is frozen
-        require(!frozenAccount[_to]);      //callisto recommendation                             // Check if recipient is frozen
+        if(frozenExpired[_from] != 0 ){                                 // Check if sender is frozen
+            require(block.timestamp > frozenExpired[_from]);
+            _unfreezeAccount(_from);
+        }
+        if(frozenExpired[_to] != 0 ){                                   // Check if recipient is frozen
+            require(block.timestamp > frozenExpired[_to]);
+            _unfreezeAccount(_to);
+        }
+
         uint256 previousBalances = balances[_from].add(balances[_to]);  // Save this for an assertion in the future
 
         balances[_from] = balances[_from].sub(_value);                  // Subtract from the sender
@@ -451,57 +503,29 @@ contract TokenERC20 is RunningConctractManager {
     }
 
 
-    /**
-     * Destroy tokens
-     *
-     * Remove `_value` tokens from the system irreversibly
-     *
-     * @param _value the amount of money to burn
-     */
-    /* callisto recommendation
-    function burn(uint256 _value) onlyOwner public returns (bool success) {
-        require(balances[msg.sender] >= _value);                            // Check if the sender has enough
-        balances[msg.sender] = balances[msg.sender].sub(_value);            // Subtract from the sender
-        totalSupply = totalSupply.sub(_value);                              // Updates totalSupply
-        emit Burn(msg.sender, _value);
-        success = true;
-        return success;
-    }
-    */
-    /**
-     * Destroy tokens from other account
-     *
-     * @notice Remove `_value` tokens from the system irreversibly on behalf of `_from`.
-     *
-     * @param _from the address of the sender
-     * @param _value the amount of money to burn
-     */
-     /* callisto recommendation
-    function burnFrom(address _from, uint256 _value) onlyOwner public returns (bool success) {
-        require(balances[_from] >= _value);                                         // Check if the targeted balance is enough
-        require(allowed[_from][msg.sender] >= _value);                              // Check allowance
-        balances[_from] = balances[_from].sub(_value);                              // Subtract from the targeted balance
-        allowed[_from][msg.sender] = allowed[_from][msg.sender].sub(_value);        // Subtract from the sender's allowance
-        totalSupply = totalSupply.sub(_value);                                      // Update totalSupply
-        emit Burn(_from, _value);
-        success = true;
-        return success;
-    }
-    */
-
-
     /// @notice `freeze? Prevent` `target` from sending & receiving tokens
     /// @param target Address to be frozen
-    function freezeAccount(address target) onlyOwner committeeApproved public {
-        frozenAccount[target] = true;
+    function freezeAccount(address target, uint256 freezeExpiration) onlyOwner committeeApproved public {
+        //frozenAccount[target] = true;
+        frozenExpired[target] = freezeExpiration;
         emit FrozenFunds(target, true);
     }
 
-    /// @notice `freeze? Allow` `target` from sending & receiving tokens
+    /// @notice  `freeze? Allow` `target` from sending & receiving tokens
     /// @param target Address to be unfrozen
-    function unfreezeAccount(address target) onlyOwner committeeApproved public {
-        frozenAccount[target] = false;
+    function _unfreezeAccount(address target) internal returns (bool success) {
+        //frozenAccount[target] = false;
+        frozenExpired[target] = 0;
         emit FrozenFunds(target, false);
+        success = true;
+        return success;
+    }
+
+    /// @notice ...
+    /// @param target ...
+    function unfreezeAccount(address target) onlyOwner committeeApproved public returns(bool success) {
+        success = _unfreezeAccount(target);
+        return success;
     }
 
 }
@@ -685,6 +709,7 @@ contract NemodaxStorage is RunningConctractManager {
 
 contract ProxyNemodax is NemodaxStorage {
 
+    /* Initialize new committee. this will be real committee accounts, not from TokenExchanger contract */
     constructor(address payable _coOwner1,
                 address payable _coOwner2,
                 address payable _coOwner3)
