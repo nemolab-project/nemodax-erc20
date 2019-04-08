@@ -1,7 +1,8 @@
-// [v0.2.12] 추가 사항
+// [v0.2.13] 추가 사항
 // frozen Expiration 개념 도입
 // 테스트 완료
 // 계좌 동결시 timestamp 값으로 동결이 풀리는 만료시간을 등록
+// closeExhchanger 추가
 
 pragma solidity 0.5.4;
 
@@ -96,7 +97,7 @@ contract MultiOwnable {
      * @notice committee must be 3 at least.
      *         you have to use this contract to be inherited because it is internal.
      *
-     * @param _coOwner1, _coOwner2, _coOwner3 commitee members
+     * @param _coOwner1 _coOwner2 _coOwner3 commitee members
      */
     constructor(address payable _coOwner1, address payable _coOwner2, address payable _coOwner3) internal {
         require(_coOwner1 != address(0x0) &&
@@ -330,7 +331,6 @@ contract TokenERC20 is RunningConctractManager {
     mapping (address => uint256) public frozenExpired;
 
     bool private initialized = false;
-
     /**
      * This is area for some variables to add.
      * Please add variables from the end of pre-declared variables
@@ -452,7 +452,6 @@ contract TokenERC20 is RunningConctractManager {
      * @param _value the amount to send
      */
     function transfer(address _to, uint256 _value) public noReentrancy returns (bool success) {
-        require( _to != address(this) ); // callisto recommendation
         _transfer(msg.sender, _to, _value);
         success = true;
         return success;
@@ -506,23 +505,23 @@ contract TokenERC20 is RunningConctractManager {
     /// @notice `freeze? Prevent` `target` from sending & receiving tokens
     /// @param target Address to be frozen
     function freezeAccount(address target, uint256 freezeExpiration) onlyOwner committeeApproved public {
-        //frozenAccount[target] = true;
         frozenExpired[target] = freezeExpiration;
         emit FrozenFunds(target, true);
     }
 
     /// @notice  `freeze? Allow` `target` from sending & receiving tokens
+    /// @notice if expiration date was over, when this is called with transfer transaction, auto-unfreeze is occurred without committeeApproved
+    ///         the reason why it's separated from wrapper function.
     /// @param target Address to be unfrozen
     function _unfreezeAccount(address target) internal returns (bool success) {
-        //frozenAccount[target] = false;
         frozenExpired[target] = 0;
         emit FrozenFunds(target, false);
         success = true;
         return success;
     }
 
-    /// @notice ...
-    /// @param target ...
+    /// @notice _unfreezeAccount wrapper function.
+    /// @param target Address to be unfrozen
     function unfreezeAccount(address target) onlyOwner committeeApproved public returns(bool success) {
         success = _unfreezeAccount(target);
         return success;
@@ -540,7 +539,8 @@ contract TokenERC20 is RunningConctractManager {
 contract TokenExchanger is TokenERC20{
   using SafeMath for uint256;
 
-    uint256 internal tokenPerEth;
+    uint256 public tokenPerEth;
+    bool public opened;
 
     event ExchangeEtherToToken(address indexed from, uint256 etherValue, uint256 tokenPerEth);
     event ExchangeTokenToEther(address indexed from, uint256 etherValue, uint256 tokenPerEth);
@@ -552,7 +552,7 @@ contract TokenExchanger is TokenERC20{
     constructor(address payable _coOwner1,
                 address payable _coOwner2,
                 address payable _coOwner3)
-        MultiOwnable( _coOwner1, _coOwner2, _coOwner3) public {}
+        MultiOwnable( _coOwner1, _coOwner2, _coOwner3) public { opened = true; }
 
     /**
      * Initialize Exchanger Function
@@ -567,6 +567,7 @@ contract TokenExchanger is TokenERC20{
         uint256 _initialSupply,
         uint256 _tokenPerEth
     ) external onlyOwner committeeApproved {
+        require(opened);
         require(_tokenPerEth > 0 && _initialSupply > 0);  // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101
 
         super.initToken(_tokenName, _tokenSymbol, _initialSupply);
@@ -582,6 +583,7 @@ contract TokenExchanger is TokenERC20{
      * tokenPerEth is needed by then and it would be managed by manager.
      */
     function setExchangeRate(uint256 _tokenPerEth) onlyOwner committeeApproved external returns (bool success){
+        require(opened);
         require( _tokenPerEth > 0);
         tokenPerEth = _tokenPerEth;
         emit SetExchangeRate(msg.sender, tokenPerEth);
@@ -600,6 +602,7 @@ contract TokenExchanger is TokenERC20{
      * @notice Send `Nemo` tokens to msg sender as much as amount of ether received considering exchangeRate.
      */
     function exchangeEtherToToken() payable external noReentrancy returns (bool success){
+        require(opened);
         uint256 tokenPayment;
         uint256 ethAmount = msg.value;
 
@@ -623,6 +626,7 @@ contract TokenExchanger is TokenERC20{
      * @param _value Amount of 'Nemo' token
      */
     function exchangeTokenToEther(uint256 _value) external noReentrancy returns (bool success){
+      require(opened);
       require(tokenPerEth != 0);
 
       uint256 remainingEthBalance = address(this).balance;
@@ -648,9 +652,9 @@ contract TokenExchanger is TokenERC20{
      * @param _value Amount of token to withdraw.
      */
     function withdrawToken(address _recipient, uint256 _value) onlyOwner committeeApproved noReentrancy public{
+      require(opened);
       super._transfer(address(this) ,_recipient, _value);
       emit WithdrawToken(_recipient, _value);
-
     }
 
 
@@ -663,9 +667,18 @@ contract TokenExchanger is TokenERC20{
      * @param _value Amount of Ether to withdraw.
      */
     function withdrawEther(address payable _recipient, uint256 _value) onlyOwner committeeApproved noReentrancy public {
+        require(opened);
         require(_recipient.send(_value));
         emit WithdrawEther(_recipient, _value);
+    }
 
+    /**
+     * close the TokenExchanger functions permanently
+     *
+     * @notice This contract would be closed when the coin is actively traded and judged that its TokenExchanger function is not needed.
+     */
+    function closeExchanger() onlyOwner committeeApproved external {
+        opened = false;
     }
 }
 
@@ -694,9 +707,8 @@ contract NemodaxStorage is RunningConctractManager {
 
     bool private initialized = false;
 
-    uint256 internal tokenPerEth;
-    //constructor() Ownable() internal {}
-
+    uint256 public tokenPerEth;
+    bool public opened = true;
 }
 
 /**
