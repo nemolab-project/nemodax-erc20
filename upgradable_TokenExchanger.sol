@@ -92,18 +92,20 @@ contract MultiOwnable {
 
 
     /**
-     * Organize initial commitee.
+     * Organize initial committee.
      *
      * @notice committee must be 3 at least.
      *         you have to use this contract to be inherited because it is internal.
      *
-     * @param _coOwner1 _coOwner2 _coOwner3 commitee members
+     * @param _coOwner1 _coOwner2 _coOwner3 committee members
      */
-    constructor(address payable _coOwner1, address payable _coOwner2, address payable _coOwner3) internal {
+    constructor(address _coOwner1, address _coOwner2, address _coOwner3) internal {
         require(_coOwner1 != address(0x0) &&
                 _coOwner2 != address(0x0) &&
                 _coOwner3 != address(0x0));
-
+        require(_coOwner1 != _coOwner2 &&
+                _coOwner2 != _coOwner3 &&
+                _coOwner3 != _coOwner1); // SmartDec Recommendations
         owner[_coOwner1] = true;
         owner[_coOwner2] = true;
         owner[_coOwner3] = true;
@@ -128,10 +130,13 @@ contract MultiOwnable {
      */
     modifier committeeApproved() {
       /* check if proposed Function Name and real function Name are correct */
+      /*
       require(committeeStatus.proposedFuncHash[0] == msg.data[0] &&
                 committeeStatus.proposedFuncHash[1] == msg.data[1] &&
                 committeeStatus.proposedFuncHash[2] == msg.data[2] &&
                 committeeStatus.proposedFuncHash[3] == msg.data[3]);
+*/
+      require(committeeStatus.proposedFuncHash == msg.sig);
 
       /* To check unanimity */
       require(committeeStatus.numOfVotes == committeeStatus.numOfOwners);
@@ -192,7 +197,8 @@ contract MultiOwnable {
      */
     function vote() onlyOwner public {
       // Check duplicated voting list.
-      for(uint i=0; i<ballot.length; i++)
+      uint length = ballot.length; // SmartDec Recommendations
+      for(uint i=0; i<length; i++) // SmartDec Recommendations
         require(ballot[i] != msg.sender);
 
       //onlyOnwers can vote, if there's ongoing proposal.
@@ -200,7 +206,7 @@ contract MultiOwnable {
       require( bytes(strFuncName).length != 0);
 
       //Check, if everyone voted.
-      require(committeeStatus.numOfOwners > committeeStatus.numOfVotes);
+      //require(committeeStatus.numOfOwners > committeeStatus.numOfVotes); // SmartDec Recommendations
       committeeStatus.numOfVotes++;
       ballot.push(msg.sender);
       emit Vote(msg.sender, committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash);
@@ -213,7 +219,7 @@ contract MultiOwnable {
      * @notice It transfers authority to the person who was not the owner.
      *           Approval from the committee is required.
      */
-    function transferOwnership(address payable _newOwner) onlyOwner committeeApproved public {
+    function transferOwnership(address _newOwner) onlyOwner committeeApproved public {
         require( _newOwner != address(0x0) ); // callisto recommendation
         require( owner[_newOwner] == false );
         owner[msg.sender] = false;
@@ -227,7 +233,7 @@ contract MultiOwnable {
      * @notice Approval from the committee is required.
      *
      */
-    function addOwner(address payable _newOwner) onlyOwner committeeApproved public {
+    function addOwner(address _newOwner) onlyOwner committeeApproved public {
         require( _newOwner != address(0x0) );
         require( owner[_newOwner] != true );
         owner[_newOwner] = true;
@@ -241,7 +247,7 @@ contract MultiOwnable {
      * @notice Approval from the committee is required.
      *
      */
-    function removeOwner(address payable _toRemove) onlyOwner committeeApproved public {
+    function removeOwner(address _toRemove) onlyOwner committeeApproved public {
         require( _toRemove != address(0x0) );
         require( owner[_toRemove] == true );
         require( committeeStatus.numOfOwners > committeeStatus.numOfMinOwners ); // must keep Number of Minimum Owners at least.
@@ -292,20 +298,22 @@ contract Pausable is MultiOwnable {
 /**
  * Contract Managing TokenExchanger's address used by ProxyNemodazΩ
  */
-contract RunningConctractManager is Pausable{
-    address internal implementation;
+contract RunningContractManager is Pausable {
+    address public implementation; //SmartDec Recommendations
 
     event Upgraded(address indexed newContract);
 
     function upgrade(address _newAddr) onlyOwner committeeApproved external {
         require(implementation != _newAddr);
         implementation = _newAddr;
-        emit Upgraded(implementation);
+        emit Upgraded(_newAddr); // SmartDec Recommendations
     }
 
+    /* SmartDec Recommendations
     function runningAddress() onlyOwner external view returns (address){
         return implementation;
     }
+    */
 }
 
 
@@ -315,7 +323,7 @@ contract RunningConctractManager is Pausable{
  * Written by Shin HyunJae
  * version 12
  */
-contract TokenERC20 is RunningConctractManager {
+contract TokenERC20 is RunningContractManager {
     using SafeMath for uint256;
 
     // Public variables of the token
@@ -327,10 +335,11 @@ contract TokenERC20 is RunningConctractManager {
     /* This creates an array with all balances */
     mapping (address => uint256) public balances;
     mapping (address => mapping (address => uint256)) public allowed;
-    //mapping (address => bool) public frozenAccount;
+    //mapping (address => bool) public frozenAccount; // SmartDec Recommendations
     mapping (address => uint256) public frozenExpired;
 
-    bool private initialized = false;
+    //bool private initialized = false;
+    bool private initialized; // SmartDec Recommendations
     /**
      * This is area for some variables to add.
      * Please add variables from the end of pre-declared variables
@@ -352,7 +361,8 @@ contract TokenERC20 is RunningConctractManager {
     // event Burn(address indexed from, uint256 value); // callisto recommendation
 
     // This notifies clients about the freezing address
-    event FrozenFunds(address target, bool frozen); // callisto recommendation
+    //event FrozenFunds(address target, bool frozen); // callisto recommendation
+    event FrozenFunds(address target, uint256 expirationDate); // SmartDec Recommendations
 
     /**
      * Initialize Token Function
@@ -373,7 +383,7 @@ contract TokenERC20 is RunningConctractManager {
         totalSupply = convertToDecimalUnits(_initialSupply);     // Update total supply with the decimal amount
 
         balances[msg.sender] = totalSupply;                     // Give the creator all initial tokens
-        emit Transfer(address(this), msg.sender, totalSupply);
+        emit Transfer(address(this), address(0), totalSupply);
         emit LastBalance(address(this), 0);
         emit LastBalance(msg.sender, totalSupply);
 
@@ -398,10 +408,11 @@ contract TokenERC20 is RunningConctractManager {
      *
      * @param _account Account address to query tokens balance
      */
+     /* SmartDec Recommendations
     function balanceOf(address _account) public view returns (uint256 balance) {
         balance = balances[_account];
         return balance;
-    }
+    }*/
 
     /**
      * Get allowed tokens balance
@@ -411,16 +422,17 @@ contract TokenERC20 is RunningConctractManager {
      * @param _owner Owner address to query tokens balance
      * @param _spender The address allowed tokens balance
      */
+     /* SmartDec Recommendations
     function allowance(address _owner, address _spender) external view returns (uint256 remaining) {
         remaining = allowed[_owner][_spender];
         return remaining;
-    }
+    }*/
 
     /**
      * Internal transfer, only can be called by this contract
      */
     function _transfer(address _from, address _to, uint256 _value) internal {
-        require(_to != address(0x0));                                            // Prevent transfer to 0x0 address. Use burn() instead
+        require(_to != address(0x0));                                            // Prevent transfer to 0x0 address.
         require(balances[_from] >= _value);                             // Check if the sender has enough
         if(frozenExpired[_from] != 0 ){                                 // Check if sender is frozen
             require(block.timestamp > frozenExpired[_from]);
@@ -502,11 +514,51 @@ contract TokenERC20 is RunningConctractManager {
     }
 
 
+    /**
+     * @dev Increase the amount of tokens that an owner allowed to a spender.
+     * approve should be called when allowed[_spender] == 0. To increment
+     * allowed value is better to use this function to avoid 2 calls (and wait until
+     * the first transaction is mined)
+     * From MonolithDAO Token.sol
+     * @param _spender The address which will spend the funds.
+     * @param _addedValue The amount of tokens to increase the allowance by.
+     */
+    function increaseApproval(address _spender, uint256 _addedValue) public returns (bool) {
+      allowed[msg.sender][_spender] = (
+        allowed[msg.sender][_spender].add(_addedValue));
+      emit Approval(msg.sender, _spender, allowed[msg.sender][_spender]);
+      return true;
+    }
+
+    /**
+     * @dev Decrease the amount of tokens that an owner allowed to a spender.
+     * approve should be called when allowed[_spender] == 0. To decrement
+     * allowed value is better to use this function to avoid 2 calls (and wait until
+     * the first transaction is mined)
+     * From MonolithDAO Token.sol
+     * @param _spender The address which will spend the funds.
+     * @param _subtractedValue The amount of tokens to decrease the allowance by.
+     */
+    function decreaseApproval(address _spender, uint256 _subtractedValue) public returns (bool) {
+      uint256 oldValue = allowed[msg.sender][_spender];
+      if (_subtractedValue >= oldValue) {
+        allowed[msg.sender][_spender] = 0;
+      } else {
+        allowed[msg.sender][_spender] = oldValue.sub(_subtractedValue);
+      }
+      emit Approval(msg.sender, _spender, allowed[msg.sender][_spender]);
+      return true;
+    }
+
+
+
+
     /// @notice `freeze? Prevent` `target` from sending & receiving tokens
     /// @param target Address to be frozen
     function freezeAccount(address target, uint256 freezeExpiration) onlyOwner committeeApproved public {
         frozenExpired[target] = freezeExpiration;
-        emit FrozenFunds(target, true);
+        //emit FrozenFunds(target, true);
+        emit FrozenFunds(target, freezeExpiration); // SmartDec Recommendations
     }
 
     /// @notice  `freeze? Allow` `target` from sending & receiving tokens
@@ -515,7 +567,8 @@ contract TokenERC20 is RunningConctractManager {
     /// @param target Address to be unfrozen
     function _unfreezeAccount(address target) internal returns (bool success) {
         frozenExpired[target] = 0;
-        emit FrozenFunds(target, false);
+        //emit FrozenFunds(target, false);
+        emit FrozenFunds(target, 0); // SmartDec Recommendations
         success = true;
         return success;
     }
@@ -549,9 +602,9 @@ contract TokenExchanger is TokenERC20{
     event SetExchangeRate(address indexed from, uint256 tokenPerEth);
 
 
-    constructor(address payable _coOwner1,
-                address payable _coOwner2,
-                address payable _coOwner3)
+    constructor(address _coOwner1,
+                address _coOwner2,
+                address _coOwner3)
         MultiOwnable( _coOwner1, _coOwner2, _coOwner3) public { opened = true; }
 
     /**
@@ -568,7 +621,8 @@ contract TokenExchanger is TokenERC20{
         uint256 _tokenPerEth
     ) external onlyOwner committeeApproved {
         require(opened);
-        require(_tokenPerEth > 0 && _initialSupply > 0);  // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101
+        //require(_tokenPerEth > 0 && _initialSupply > 0);  // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101
+        require(_tokenPerEth > 0); // SmartDec Recommendations
 
         super.initToken(_tokenName, _tokenSymbol, _initialSupply);
         tokenPerEth = _tokenPerEth;
@@ -592,10 +646,11 @@ contract TokenExchanger is TokenERC20{
         return success;
     }
 
+    /* SmartDec Recommendations
     function getExchangerRate() external view returns(uint256){
         return tokenPerEth;
     }
-
+    */
     /**
      * Exchange Ether To Token
      *
@@ -636,7 +691,8 @@ contract TokenExchanger is TokenERC20{
 
       uint256 tokenAmount = _value.sub(remainder); // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
       super._transfer(msg.sender, address(this), tokenAmount); // [2019.03.06 Fixing Securify vulnerabilities-Division influences Transfer Amount]
-      require(address(msg.sender).send(etherPayment));
+      //require(address(msg.sender).send(etherPayment));
+      address(msg.sender).transfer(etherPayment); // SmartDec Recommendations
 
       emit ExchangeTokenToEther(address(this), etherPayment, tokenPerEth);
       success = true;
@@ -668,7 +724,8 @@ contract TokenExchanger is TokenERC20{
      */
     function withdrawEther(address payable _recipient, uint256 _value) onlyOwner committeeApproved noReentrancy public {
         require(opened);
-        require(_recipient.send(_value));
+        //require(_recipient.send(_value));
+        _recipient.transfer(_value); // SmartDec Recommendations
         emit WithdrawEther(_recipient, _value);
     }
 
@@ -691,7 +748,7 @@ contract TokenExchanger is TokenERC20{
  *      If it should be edited, please add from the end of the contract .
  */
 
-contract NemodaxStorage is RunningConctractManager {
+contract NemodaxStorage is RunningContractManager {
 
     // Never ever change the order of variables below!!!!
     // Public variables of the token
@@ -703,9 +760,9 @@ contract NemodaxStorage is RunningConctractManager {
     /* This creates an array with all balances */
     mapping (address => uint256) public balances;
     mapping (address => mapping (address => uint256)) public allowed;
-    mapping (address => bool) public frozenAccount; //callisto recommendation
+    mapping (address => bool) public frozenExpired; // SmartDec Recommendations
 
-    bool private initialized = false;
+    bool private initialized;
 
     uint256 public tokenPerEth;
     bool public opened = true;
@@ -722,9 +779,9 @@ contract NemodaxStorage is RunningConctractManager {
 contract ProxyNemodax is NemodaxStorage {
 
     /* Initialize new committee. this will be real committee accounts, not from TokenExchanger contract */
-    constructor(address payable _coOwner1,
-                address payable _coOwner2,
-                address payable _coOwner3)
+    constructor(address _coOwner1,
+                address _coOwner2,
+                address _coOwner3)
         MultiOwnable( _coOwner1, _coOwner2, _coOwner3) public {}
 
     function () payable external {
