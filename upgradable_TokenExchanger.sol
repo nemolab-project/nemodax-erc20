@@ -60,32 +60,32 @@ library SafeMath {
 /**
  * @title MultiOwnable
  *
- * @dev Allows multiple owners to unanimously decide on the use and accessibility of features
+ * @dev Require majority approval of multiple owners to use and access to features
  *      when restrictions on access to critical functions are required.
  *
  */
 
 contract MultiOwnable {
+    using SafeMath for uint8;
 
     struct CommitteeStatusPack{
       /**
        * Key informations for decisions.
-       * To save some gas, chose the struct.
+       * To save some gas, choosing the struct.
        */
         uint8 numOfOwners;
         uint8 numOfVotes;
         uint8 numOfMinOwners;
-        bytes4 proposedFuncHash;
-        string proposedFuncName;
+        bytes proposedFuncData;
     }
     CommitteeStatusPack public committeeStatus;
 
     address[] public ballot; // To make sure if it already was voted
     mapping(address => bool) public owner;
 
-    event Vote(address indexed proposer, string indexed proposedFuncName, bytes4 proposedFuncHash);
-    event Propose(address indexed proposer, string indexed proposedFuncName, bytes4 proposedFuncHash);
-    event Dismiss(address indexed proposer, string indexed proposedFuncName, bytes4 proposedFuncHash);
+    event Vote(address indexed proposer, bytes indexed proposedFuncData);
+    event Propose(address indexed proposer, bytes indexed proposedFuncData);
+    event Dismiss(address indexed proposer, bytes indexed proposedFuncData);
     event AddedOwner(address newOwner);
     event RemovedOwner(address removedOwner);
     event TransferOwnership(address from, address to);
@@ -99,21 +99,34 @@ contract MultiOwnable {
      *
      * @param _coOwner1 _coOwner2 _coOwner3 committee members
      */
-    constructor(address _coOwner1, address _coOwner2, address _coOwner3) internal {
+    constructor(address _coOwner1, address _coOwner2, address _coOwner3, address _coOwner4, address _coOwner5) internal {
         require(_coOwner1 != address(0x0) &&
                 _coOwner2 != address(0x0) &&
-                _coOwner3 != address(0x0));
+                _coOwner3 != address(0x0) &&
+                _coOwner4 != address(0x0) &&
+                _coOwner5 != address(0x0));
         require(_coOwner1 != _coOwner2 &&
+                _coOwner1 != _coOwner3 &&
+                _coOwner1 != _coOwner4 &&
+                _coOwner1 != _coOwner5 &&
                 _coOwner2 != _coOwner3 &&
-                _coOwner3 != _coOwner1); // SmartDec Recommendations
+                _coOwner2 != _coOwner4 &&
+                _coOwner2 != _coOwner5 &&
+                _coOwner3 != _coOwner4 &&
+                _coOwner3 != _coOwner5 &&
+                _coOwner4 != _coOwner5); // SmartDec Recommendations
         owner[_coOwner1] = true;
         owner[_coOwner2] = true;
         owner[_coOwner3] = true;
-        committeeStatus.numOfOwners = 3;
-        committeeStatus.numOfMinOwners = 3;
+        owner[_coOwner4] = true;
+        owner[_coOwner5] = true;
+        committeeStatus.numOfOwners = 5;
+        committeeStatus.numOfMinOwners = 5;
         emit AddedOwner(_coOwner1);
         emit AddedOwner(_coOwner2);
         emit AddedOwner(_coOwner3);
+        emit AddedOwner(_coOwner4);
+        emit AddedOwner(_coOwner5);
     }
 
 
@@ -125,40 +138,35 @@ contract MultiOwnable {
     /**
      * Pre-check if it's decided by committee
      *
-     * @notice If the function is unanimously approved,
+     * @notice If there is a majority approval,
      *         the function with this modifier will not be executed.
      */
     modifier committeeApproved() {
       /* check if proposed Function Name and real function Name are correct */
-      /*
-      require(committeeStatus.proposedFuncHash[0] == msg.data[0] &&
-                committeeStatus.proposedFuncHash[1] == msg.data[1] &&
-                committeeStatus.proposedFuncHash[2] == msg.data[2] &&
-                committeeStatus.proposedFuncHash[3] == msg.data[3]);
-*/
-      require(committeeStatus.proposedFuncHash == msg.sig);
 
-      /* To check unanimity */
-      require(committeeStatus.numOfVotes == committeeStatus.numOfOwners);
+      //require(committeeStatus.proposedFuncHash == msg.sig);
+      require( keccak256(committeeStatus.proposedFuncData) == keccak256(msg.data) ); // SmartDec Recommendations
+
+      /* To check majority */
+      require(committeeStatus.numOfVotes > committeeStatus.numOfOwners.div(2));
       _;
       _dismiss(); //Once a commission-approved proposal is made, the proposal is initialized.
     }
+
 
     /**
      * Suggest the functions you want to use.
      *
      * @notice To use some importan functions, propose function must be done first and voted.
      */
-    function propose(string memory _targetFuncName) onlyOwner public {
+    function propose(bytes memory _targetFuncData) onlyOwner public {
       /* Check if there're any ongoing proposals */
       require(committeeStatus.numOfVotes == 0);
-      string memory strFuncName = committeeStatus.proposedFuncName;
-      require(bytes(strFuncName).length == 0);
+      require(committeeStatus.proposedFuncData.length == 0);
 
       /* regist function informations that proposer want to run */
-      committeeStatus.proposedFuncName = _targetFuncName;
-      committeeStatus.proposedFuncHash = bytes4(keccak256(bytes(_targetFuncName)));
-      emit Propose(msg.sender, committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash);
+      committeeStatus.proposedFuncData = _targetFuncData;
+      emit Propose(msg.sender, _targetFuncData);
     }
 
     /**
@@ -180,10 +188,9 @@ contract MultiOwnable {
      */
 
     function _dismiss() internal {
-      emit Dismiss(msg.sender, committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash);
+      emit Dismiss(msg.sender, committeeStatus.proposedFuncData);
       committeeStatus.numOfVotes = 0;
-      committeeStatus.proposedFuncName = "";
-      committeeStatus.proposedFuncHash = bytes4("");
+      committeeStatus.proposedFuncData = "";
       delete ballot;
     }
 
@@ -192,9 +199,10 @@ contract MultiOwnable {
      * Owners vote for proposed item
      *
      * @notice if only there're proposals, 'vote' is processed.
-     *         the result must be unanimity.
+     *         the result must be majority.
      *         one ticket for each owner.
      */
+
     function vote() onlyOwner public {
       // Check duplicated voting list.
       uint length = ballot.length; // SmartDec Recommendations
@@ -202,14 +210,13 @@ contract MultiOwnable {
         require(ballot[i] != msg.sender);
 
       //onlyOnwers can vote, if there's ongoing proposal.
-      string memory strFuncName = committeeStatus.proposedFuncName;
-      require( bytes(strFuncName).length != 0);
+      require( committeeStatus.proposedFuncData.length != 0 );
 
       //Check, if everyone voted.
       //require(committeeStatus.numOfOwners > committeeStatus.numOfVotes); // SmartDec Recommendations
       committeeStatus.numOfVotes++;
       ballot.push(msg.sender);
-      emit Vote(msg.sender, committeeStatus.proposedFuncName, committeeStatus.proposedFuncHash);
+      emit Vote(msg.sender, committeeStatus.proposedFuncData);
     }
 
 
@@ -340,6 +347,7 @@ contract TokenERC20 is RunningContractManager {
 
     //bool private initialized = false;
     bool private initialized; // SmartDec Recommendations
+
     /**
      * This is area for some variables to add.
      * Please add variables from the end of pre-declared variables
@@ -604,8 +612,10 @@ contract TokenExchanger is TokenERC20{
 
     constructor(address _coOwner1,
                 address _coOwner2,
-                address _coOwner3)
-        MultiOwnable( _coOwner1, _coOwner2, _coOwner3) public { opened = true; }
+                address _coOwner3,
+                address _coOwner4,
+                address _coOwner5)
+        MultiOwnable( _coOwner1, _coOwner2, _coOwner3, _coOwner4, _coOwner5) public { opened = true; }
 
     /**
      * Initialize Exchanger Function
@@ -781,8 +791,10 @@ contract ProxyNemodax is NemodaxStorage {
     /* Initialize new committee. this will be real committee accounts, not from TokenExchanger contract */
     constructor(address _coOwner1,
                 address _coOwner2,
-                address _coOwner3)
-        MultiOwnable( _coOwner1, _coOwner2, _coOwner3) public {}
+                address _coOwner3,
+                address _coOwner4,
+                address _coOwner5)
+        MultiOwnable( _coOwner1, _coOwner2, _coOwner3, _coOwner4, _coOwner5) public {}
 
     function () payable external {
         address localImpl = implementation;
