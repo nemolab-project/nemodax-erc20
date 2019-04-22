@@ -160,7 +160,7 @@ contract MultiOwnable {
      * @notice committee must be 3 at least.
      *         you have to use this contract to be inherited because it is internal.
      *
-     * @param _coOwner1 _coOwner2 _coOwner3 committee members
+     * @param _coOwner1 _coOwner2 _coOwner3 _coOwner4 _coOwner5 committee members
      */
     constructor(address _coOwner1, address _coOwner2, address _coOwner3, address _coOwner4, address _coOwner5) internal {
         require(_coOwner1 != address(0x0) &&
@@ -363,7 +363,7 @@ contract Pausable is MultiOwnable {
 }
 
 /**
- * Contract Managing TokenExchanger's address used by ProxyNemodazΩ
+ * Contract Managing TokenExchanger's address used by ProxyNemodax
  */
 contract RunningContractManager is Pausable {
     address public implementation; //SmartDec Recommendations
@@ -463,11 +463,11 @@ contract TokenERC20 is RunningContractManager {
         // SmartDec Recommendations
         uint256 tempSupply = convertToDecimalUnits(_initialSupply);
 
-        uint256 dividendBalance = tempSupply.div(10); // dividendBalance = 10%
-        uint256 reserveFundBalance = dividendBalance; // reserveFundBalance = 10%
-        uint256 marketSaleBalance = tempSupply.div(5); // marketSaleBalance = 20%
+        uint256 dividendBalance = tempSupply.div(10);               // dividendBalance = 10%
+        uint256 reserveFundBalance = dividendBalance;               // reserveFundBalance = 10%
+        uint256 marketSaleBalance = tempSupply.div(5);              // marketSaleBalance = 20%
         uint256 serviceOperationBalance = marketSaleBalance.mul(2); // serviceOperationBalance = 40%
-        uint256 incentiveBalance = marketSaleBalance; // incentiveBalance = 20%
+        uint256 incentiveBalance = marketSaleBalance;               // incentiveBalance = 20%
 
         balances[_marketSaleManager] = marketSaleBalance;
         balances[_serviceOperationManager] = serviceOperationBalance;
@@ -721,13 +721,14 @@ contract TokenExchanger is TokenERC20{
      * Initialize Exchanger contract with tokenPerEth
      * and Initialize NemoCoin by calling initToken
      * It would call initToken in TokenERC20 with _tokenName, _tokenSymbol, _initalSupply
+     * Last five arguments are manager account to supply currency (_marketSaleManager, _serviceOperationManager, _dividendManager, _incentiveManager, _reserveFundManager)
+     *
      */
     function initExchanger(
         string calldata _tokenName,
         string calldata _tokenSymbol,
         uint256 _initialSupply,
         uint256 _tokenPerEth,
-
         address _marketSaleManager,
         address _serviceOperationManager,
         address _dividendManager,
