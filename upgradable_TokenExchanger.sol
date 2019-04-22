@@ -1,8 +1,71 @@
-// [v0.2.13] 추가 사항
-// frozen Expiration 개념 도입
-// 테스트 완료
-// 계좌 동결시 timestamp 값으로 동결이 풀리는 만료시간을 등록
-// closeExhchanger 추가
+// [v0.2.14] fix the SmartDec Audit results
+// Critical Issue
+// 1. the storage structure of ProxyNemodax contract does not coincide the one of TokenExchanger contract.
+//  => Match with 'frozenExpired', line 405, line 898
+//
+// Medium Issues
+// 2. committeeApproved() modifier verifies only the function signature but not its arguments
+//  => line 208
+//     require( keccak256(committeeStatus.proposedFuncData) == keccak256(msg.data) ); // SmartDec Recommendations
+// 3.(request to waive) overpowered owner
+//  => please see the right below paragraphs
+//   - set any ExchangeRate;
+//    We're gonna launch a service to ordinary users without listing on exchanges or ICO. so we need to provide our coins to users. I'll make this with ETH and This needs exchange rate whatever kind of it is.
+//
+//   - withdraw tokens and ether.
+//    I thought that it would be fine that owner withdraw tokens and ether from ProxyNemodax.
+//    Charging in proxyNemodax before withdrawing is for a simple currency exchange service(ETH->NemoCoin, NemoCoin->ETH). Technically, it's all owner's assets.
+//  plus, To reduce the power of only one owner, we designed multiple owner structure.
+// 4.(request to waive) No tests and deployment script
+//  => unfortunately I haven't written test codes and depolyment script
+//     and There isn't much time to write the new codes.
+// 5. Whitepaper mismatch
+//  => initToken line 443 ~ 447, line 462 ~ 491
+//  => initExchanger, line 729 ~ 733, line 738 ~ 752, line 756 ~ 760
+//     Add 5 manager account and transfer initial balances, when it will initialized
+//
+// Low Issues
+// 6. Excessive gas consumption
+//  6-1. The condition inside for loop at line 195 uses storage variable
+//   => line 267, 268
+//    uint length = ballot.length; // SmartDec Recommendations
+//    for(uint i=0; i<length; i++) // SmartDec Recommendations
+//  6-2. recommend using _newAddr instead of implementation
+//   => line 374
+//    emit Upgraded(_newAddr); // SmartDec Recommendations
+// 7. Send instead of transfer
+//  => line 829
+//    address(msg.sender).transfer(etherPayment); // SmartDec Recommendations
+//  => line 862
+//    _recipient.transfer(_value); // SmartDec Recommendations
+// 8. Redundant code
+//  => deleting ,line 278
+//    require(committeeStatus.numOfOwners >
+//    committeeStatus.numOfVotes);
+//  => deleting, line 379 ~ 383
+//  8-1.(request to waive) noReentrancy
+//   => if the only reason is to decrease gas consumption, can I leave this now?
+//  8-2. _initialSupply variable verification is redundant since it duplicates the check from line 369:
+//   => deleting line 738
+//  8-3. The variable initialization at line 333:
+//   => line 408
+//  8-4. There is address payable type used in the code for addresses.
+//   => deleting all 'payable' keyword not using to eth pay.
+//  8-5. deleting redundant getter functions.
+//   => balanceOf(), allowance(), getExchangerRate()
+// 9. Deviation from ERC20 standard
+// Inappropriate using Transfer event
+//  => line 480
+// not to use approve() function directly and to use
+//  => line 623 ~ 657, Adding increaseApproval() / decreaseApproval() from openzeppelin
+// 10. Missing input validation
+//  => line 171 ~ 180, line 740 ~ 754
+// 11. Misleading comment
+//  => line 541
+// 12. adding freeze time to FrozenFunds event
+//  => line 433, 667, 677
+// 13. fixing typo
+//  => line 368, 393, 887
 
 pragma solidity 0.5.4;
 
@@ -143,8 +206,6 @@ contract MultiOwnable {
      */
     modifier committeeApproved() {
       /* check if proposed Function Name and real function Name are correct */
-
-      //require(committeeStatus.proposedFuncHash == msg.sig);
       require( keccak256(committeeStatus.proposedFuncData) == keccak256(msg.data) ); // SmartDec Recommendations
 
       /* To check majority */
@@ -290,7 +351,6 @@ contract Pausable is MultiOwnable {
     /* When you discover your smart contract is under attack, you can buy time to upgrade the contract by
        immediately pausing the contract.
      */
-    //function pause() public onlyOwner whenNotPaused {
     function pause() public onlyOwner committeeApproved whenNotPaused {
         paused = true;
         emit Pause();
@@ -381,19 +441,57 @@ contract TokenERC20 is RunningContractManager {
     function initToken(
         string memory _tokenName,
         string memory _tokenSymbol,
-        uint256 _initialSupply
+        uint256 _initialSupply,
+        address _marketSaleManager,
+        address _serviceOperationManager,
+        address _dividendManager,
+        address _incentiveManager,
+        address _reserveFundManager
     ) internal onlyOwner committeeApproved {
         require( initialized == false );
         require(_initialSupply > 0 && _initialSupply <= 2**uint256(184)); // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101 => _initialSupply <= 2^184 <= (2^256 / 10^18)
 
         name = _tokenName;                                       // Set the name for display purposes
         symbol = _tokenSymbol;                                   // Set the symbol for display purposes
-        totalSupply = convertToDecimalUnits(_initialSupply);     // Update total supply with the decimal amount
+        //totalSupply = convertToDecimalUnits(_initialSupply);     // Update total supply with the decimal amount
 
-        balances[msg.sender] = totalSupply;                     // Give the creator all initial tokens
+        /*balances[msg.sender] = totalSupply;                     // Give the creator all initial tokens
         emit Transfer(address(this), address(0), totalSupply);
         emit LastBalance(address(this), 0);
-        emit LastBalance(msg.sender, totalSupply);
+        emit LastBalance(msg.sender, totalSupply);*/
+
+        // SmartDec Recommendations
+        uint256 tempSupply = convertToDecimalUnits(_initialSupply);
+
+        uint256 dividendBalance = tempSupply.div(10); // dividendBalance = 10%
+        uint256 reserveFundBalance = dividendBalance; // reserveFundBalance = 10%
+        uint256 marketSaleBalance = tempSupply.div(5); // marketSaleBalance = 20%
+        uint256 serviceOperationBalance = marketSaleBalance.mul(2); // serviceOperationBalance = 40%
+        uint256 incentiveBalance = marketSaleBalance; // incentiveBalance = 20%
+
+        balances[_marketSaleManager] = marketSaleBalance;
+        balances[_serviceOperationManager] = serviceOperationBalance;
+        balances[_dividendManager] = dividendBalance;
+        balances[_incentiveManager] = incentiveBalance;
+        balances[_reserveFundManager] = reserveFundBalance;
+
+        totalSupply = tempSupply;
+
+        emit Transfer(address(this), address(0), totalSupply);
+        emit LastBalance(address(this), 0);
+        emit LastBalance(_marketSaleManager, marketSaleBalance);
+        emit LastBalance(_serviceOperationManager, serviceOperationBalance);
+        emit LastBalance(_dividendManager, dividendBalance);
+        emit LastBalance(_incentiveManager, incentiveBalance);
+        emit LastBalance(_reserveFundManager, reserveFundBalance);
+
+        assert( tempSupply ==
+          marketSaleBalance.add(serviceOperationBalance).
+                            add(dividendBalance).
+                            add(incentiveBalance).
+                            add(reserveFundBalance)
+        );
+
 
         initialized = true;
     }
@@ -628,13 +726,41 @@ contract TokenExchanger is TokenERC20{
         string calldata _tokenName,
         string calldata _tokenSymbol,
         uint256 _initialSupply,
-        uint256 _tokenPerEth
+        uint256 _tokenPerEth,
+
+        address _marketSaleManager,
+        address _serviceOperationManager,
+        address _dividendManager,
+        address _incentiveManager,
+        address _reserveFundManager
     ) external onlyOwner committeeApproved {
         require(opened);
         //require(_tokenPerEth > 0 && _initialSupply > 0);  // [2019.03.05] Fixed for Mythril Vulerablity SWC ID:101
         require(_tokenPerEth > 0); // SmartDec Recommendations
+        require(_marketSaleManager != address(0) &&
+                _serviceOperationManager != address(0) &&
+                _dividendManager != address(0) &&
+                _incentiveManager != address(0) &&
+                _reserveFundManager != address(0));
+        require(_marketSaleManager != _serviceOperationManager &&
+                _marketSaleManager != _dividendManager &&
+                _marketSaleManager != _incentiveManager &&
+                _marketSaleManager != _reserveFundManager &&
+                _serviceOperationManager != _dividendManager &&
+                _serviceOperationManager != _incentiveManager &&
+                _serviceOperationManager != _reserveFundManager &&
+                _dividendManager != _incentiveManager &&
+                _dividendManager != _reserveFundManager &&
+                _incentiveManager != _reserveFundManager); // SmartDec Recommendations
 
-        super.initToken(_tokenName, _tokenSymbol, _initialSupply);
+        super.initToken(_tokenName, _tokenSymbol, _initialSupply,
+          // SmartDec Recommendations
+          _marketSaleManager,
+          _serviceOperationManager,
+          _dividendManager,
+          _incentiveManager,
+          _reserveFundManager
+        );
         tokenPerEth = _tokenPerEth;
         emit SetExchangeRate(msg.sender, tokenPerEth);
     }
@@ -717,7 +843,7 @@ contract TokenExchanger is TokenERC20{
      * @param _recipient The address to which the token was issued.
      * @param _value Amount of token to withdraw.
      */
-    function withdrawToken(address _recipient, uint256 _value) onlyOwner committeeApproved noReentrancy public{
+    function withdrawToken(address _recipient, uint256 _value) onlyOwner committeeApproved noReentrancy public {
       require(opened);
       super._transfer(address(this) ,_recipient, _value);
       emit WithdrawToken(_recipient, _value);
