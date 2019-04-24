@@ -1,71 +1,10 @@
-// [v0.2.14] fix the SmartDec Audit results
-// Critical Issue
-// 1. the storage structure of ProxyNemodax contract does not coincide the one of TokenExchanger contract.
-//  => Match with 'frozenExpired', line 405, line 898
-//
-// Medium Issues
-// 2. committeeApproved() modifier verifies only the function signature but not its arguments
-//  => line 208
-//     require( keccak256(committeeStatus.proposedFuncData) == keccak256(msg.data) ); // SmartDec Recommendations
-// 3.(request to waive) overpowered owner
-//  => please see the right below paragraphs
-//   - set any ExchangeRate;
-//    We're gonna launch a service to ordinary users without listing on exchanges or ICO. so we need to provide our coins to users. I'll make this with ETH and This needs exchange rate whatever kind of it is.
-//
-//   - withdraw tokens and ether.
-//    I thought that it would be fine that owner withdraw tokens and ether from ProxyNemodax.
-//    Charging in proxyNemodax before withdrawing is for a simple currency exchange service(ETH->NemoCoin, NemoCoin->ETH). Technically, it's all owner's assets.
-//  plus, To reduce the power of only one owner, we designed multiple owner structure.
-// 4.(request to waive) No tests and deployment script
-//  => unfortunately I haven't written test codes and depolyment script
-//     and There isn't much time to write the new codes.
-// 5. Whitepaper mismatch
-//  => initToken line 443 ~ 447, line 462 ~ 491
-//  => initExchanger, line 729 ~ 733, line 738 ~ 752, line 756 ~ 760
-//     Add 5 manager account and transfer initial balances, when it will initialized
-//
-// Low Issues
-// 6. Excessive gas consumption
-//  6-1. The condition inside for loop at line 195 uses storage variable
-//   => line 267, 268
-//    uint length = ballot.length; // SmartDec Recommendations
-//    for(uint i=0; i<length; i++) // SmartDec Recommendations
-//  6-2. recommend using _newAddr instead of implementation
-//   => line 374
-//    emit Upgraded(_newAddr); // SmartDec Recommendations
-// 7. Send instead of transfer
-//  => line 829
-//    address(msg.sender).transfer(etherPayment); // SmartDec Recommendations
-//  => line 862
-//    _recipient.transfer(_value); // SmartDec Recommendations
-// 8. Redundant code
-//  => deleting ,line 278
-//    require(committeeStatus.numOfOwners >
-//    committeeStatus.numOfVotes);
-//  => deleting, line 379 ~ 383
-//  8-1.(request to waive) noReentrancy
-//   => if the only reason is to decrease gas consumption, can I leave this now?
-//  8-2. _initialSupply variable verification is redundant since it duplicates the check from line 369:
-//   => deleting line 738
-//  8-3. The variable initialization at line 333:
-//   => line 408
-//  8-4. There is address payable type used in the code for addresses.
-//   => deleting all 'payable' keyword not using to eth pay.
-//  8-5. deleting redundant getter functions.
-//   => balanceOf(), allowance(), getExchangerRate()
-// 9. Deviation from ERC20 standard
-// Inappropriate using Transfer event
-//  => line 480
-// not to use approve() function directly and to use
-//  => line 623 ~ 657, Adding increaseApproval() / decreaseApproval() from openzeppelin
-// 10. Missing input validation
-//  => line 171 ~ 180, line 740 ~ 754
-// 11. Misleading comment
-//  => line 541
-// 12. adding freeze time to FrozenFunds event
-//  => line 433, 667, 677
-// 13. fixing typo
-//  => line 368, 393, 887
+// [v0.2.15] fix the SmartDec 2nd Audit results
+// 1. Re-enabling balanceOf, allowance, getExchangerRate functions and changing variables visibility to internal
+// 2. emit 5 Transfer event, line 420~424
+// 3. Changing ProxyNemodax contract's frozenExpired mapping type to mapping (address => uint256), line 842
+// 4. Removing to check the 'opened' condition in withdrawEther and withdrawToken. because this isn't related to 'open' condition. 
+//	  Once the NemoCoin transaction is active on the exchange, TokenExchanger functionality must be disabled but withdrawing must be able to do at anytime
+//    withdrawing is not stealing from contract. this isn't assined asset which is funded from anybody and It is an asset created from our online service of Nemo Labs entirely.
 
 pragma solidity 0.5.4;
 
@@ -400,8 +339,8 @@ contract TokenERC20 is RunningContractManager {
     uint256 public totalSupply;
 
     /* This creates an array with all balances */
-    mapping (address => uint256) public balances;
-    mapping (address => mapping (address => uint256)) public allowed;
+    mapping (address => uint256) internal balances;
+    mapping (address => mapping (address => uint256)) internal allowed;
     //mapping (address => bool) public frozenAccount; // SmartDec Recommendations
     mapping (address => uint256) public frozenExpired;
 
@@ -478,6 +417,12 @@ contract TokenERC20 is RunningContractManager {
         totalSupply = tempSupply;
 
         emit Transfer(address(this), address(0), totalSupply);
+        emit Transfer(address(0), _marketSaleManager, marketSaleBalance);
+        emit Transfer(address(0), _serviceOperationManager, serviceOperationBalance);
+        emit Transfer(address(0), _dividendManager, dividendBalance);
+        emit Transfer(address(0), _incentiveManager, incentiveBalance);
+        emit Transfer(address(0), _reserveFundManager, reserveFundBalance);
+
         emit LastBalance(address(this), 0);
         emit LastBalance(_marketSaleManager, marketSaleBalance);
         emit LastBalance(_serviceOperationManager, serviceOperationBalance);
@@ -514,11 +459,10 @@ contract TokenERC20 is RunningContractManager {
      *
      * @param _account Account address to query tokens balance
      */
-     /* SmartDec Recommendations
     function balanceOf(address _account) public view returns (uint256 balance) {
         balance = balances[_account];
         return balance;
-    }*/
+    }
 
     /**
      * Get allowed tokens balance
@@ -528,11 +472,10 @@ contract TokenERC20 is RunningContractManager {
      * @param _owner Owner address to query tokens balance
      * @param _spender The address allowed tokens balance
      */
-     /* SmartDec Recommendations
     function allowance(address _owner, address _spender) external view returns (uint256 remaining) {
         remaining = allowed[_owner][_spender];
         return remaining;
-    }*/
+    }
 
     /**
      * Internal transfer, only can be called by this contract
@@ -698,7 +641,7 @@ contract TokenERC20 is RunningContractManager {
 contract TokenExchanger is TokenERC20{
   using SafeMath for uint256;
 
-    uint256 public tokenPerEth;
+    uint256 internal tokenPerEth;
     bool public opened;
 
     event ExchangeEtherToToken(address indexed from, uint256 etherValue, uint256 tokenPerEth);
@@ -783,11 +726,10 @@ contract TokenExchanger is TokenERC20{
         return success;
     }
 
-    /* SmartDec Recommendations
     function getExchangerRate() external view returns(uint256){
         return tokenPerEth;
     }
-    */
+
     /**
      * Exchange Ether To Token
      *
@@ -845,7 +787,7 @@ contract TokenExchanger is TokenERC20{
      * @param _value Amount of token to withdraw.
      */
     function withdrawToken(address _recipient, uint256 _value) onlyOwner committeeApproved noReentrancy public {
-      require(opened);
+      //require(opened);
       super._transfer(address(this) ,_recipient, _value);
       emit WithdrawToken(_recipient, _value);
     }
@@ -860,7 +802,7 @@ contract TokenExchanger is TokenERC20{
      * @param _value Amount of Ether to withdraw.
      */
     function withdrawEther(address payable _recipient, uint256 _value) onlyOwner committeeApproved noReentrancy public {
-        require(opened);
+        //require(opened);
         //require(_recipient.send(_value));
         _recipient.transfer(_value); // SmartDec Recommendations
         emit WithdrawEther(_recipient, _value);
@@ -895,13 +837,13 @@ contract NemodaxStorage is RunningContractManager {
     uint256 public totalSupply;
 
     /* This creates an array with all balances */
-    mapping (address => uint256) public balances;
-    mapping (address => mapping (address => uint256)) public allowed;
-    mapping (address => bool) public frozenExpired; // SmartDec Recommendations
+    mapping (address => uint256) internal balances;
+    mapping (address => mapping (address => uint256)) internal allowed;
+    mapping (address => uint256) public frozenExpired; // SmartDec Recommendations
 
     bool private initialized;
 
-    uint256 public tokenPerEth;
+    uint256 internal tokenPerEth;
     bool public opened = true;
 }
 
