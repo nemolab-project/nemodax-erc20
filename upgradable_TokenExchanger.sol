@@ -1,4 +1,4 @@
-// [v0.2.15] fix the SmartDec 2nd Audit results
+// [v0.2.16] fix the SmartDec 3rd Audit results
 // 1. Re-enabling balanceOf, allowance, getExchangerRate functions and changing variables visibility to internal
 // 2. emit 5 Transfer event, line 420~424
 // 3. Changing ProxyNemodax contract's frozenExpired mapping type to mapping (address => uint256), line 842
@@ -416,7 +416,6 @@ contract TokenERC20 is RunningContractManager {
 
         totalSupply = tempSupply;
 
-        emit Transfer(address(this), address(0), totalSupply);
         emit Transfer(address(0), _marketSaleManager, marketSaleBalance);
         emit Transfer(address(0), _serviceOperationManager, serviceOperationBalance);
         emit Transfer(address(0), _dividendManager, dividendBalance);
