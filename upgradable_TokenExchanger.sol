@@ -1,13 +1,4 @@
-// [v0.2.16] fix the SmartDec 3rd Audit results
-// 1. Re-enabling balanceOf, allowance, getExchangerRate functions and changing variables visibility to internal
-// 2. emit 5 Transfer event, line 420~424
-// 3. Changing ProxyNemodax contract's frozenExpired mapping type to mapping (address => uint256), line 842
-// 4. Removing to check the 'opened' condition in withdrawEther and withdrawToken. because this isn't related to 'open' condition. 
-//	  Once the NemoCoin transaction is active on the exchange, TokenExchanger functionality must be disabled but withdrawing must be able to do at anytime
-//    withdrawing is not stealing from contract. this isn't assined asset which is funded from anybody and It is an asset created from our online service of Nemo Labs entirely.
-
-pragma solidity 0.5.4;
-
+// [v1.0.0] Release version on ETH MainNet
 
 /**
  * @title SafeMath
