@@ -1,5 +1,7 @@
 // [v1.0.0] Release version on ETH MainNet
 
+pragma solidity 0.5.4;
+
 /**
  * @title SafeMath
  * @dev Math operations with safety checks that throw on error
@@ -148,9 +150,9 @@ contract MultiOwnable {
     /**
      * Suggest the functions you want to use.
      *
-     * @params give the function's name and just parameter's type that you'd like to use. 
-     *         For example: "transfer(address,uint256)" or
-     *                      "initExchanger(string,string,uint256,uint256,address,address,address,address,address)"
+     * give the function's name and just parameter's type that you'd like to use. 
+     * For example: "transfer(address,uint256)" or
+     *               "initExchanger(string,string,uint256,uint256,address,address,address,address,address)"
      * @notice To use some importan functions, propose function must be done first and voted.
      */
     function propose(bytes memory _targetFuncData) onlyOwner public {
